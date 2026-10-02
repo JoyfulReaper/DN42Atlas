@@ -1,6 +1,6 @@
 namespace DN42Atlas.Registry;
 
-public static class DomainObjectParser
+public static class DomainParser
 {
     public static DomainObject Parse(string path)
     {
