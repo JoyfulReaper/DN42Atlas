@@ -71,6 +71,8 @@ config/excluded-prefixes.txt
 
 Keep both files present, even if they contain no rules. If either file is missing, Atlas fails closed: it stops rather than continuing without exclusions. Malformed CIDR rules also stop startup.
 
+Deployments with self-service exclusions can additionally set `DN42ATLAS_RUNTIME_EXCLUSIONS_PATH` to the versioned JSON policy materialized by `DN42Atlas.OptOut`. Atlas combines and deduplicates its active exact-host and CIDR rules with the required manual files. If the variable is not set, manual-only behavior is unchanged. If it is set, the runtime file is required: a missing, unreadable, malformed, unsupported, or invalid bundle stops resolution, scanning, probing, and reporting rather than silently ignoring active exclusions. The crawler never reads the private OptOut SQLite database directly; see `DN42Atlas.OptOut/README.md` for initialization and recovery commands.
+
 Use one rule per line. Blank lines are ignored, and `#` starts a comment, including after a rule.
 
 Hostname rules go in `config/excluded-hosts.txt`, for example:

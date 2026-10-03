@@ -70,7 +70,8 @@ public sealed class ExclusionPolicy
 
     public static ExclusionPolicy Load(
         string hostsPath,
-        string prefixesPath)
+        string prefixesPath,
+        string? runtimeBundlePath = null)
     {
         var hostRules =
             ReadRequiredRuleFile(hostsPath);
@@ -78,9 +79,26 @@ public sealed class ExclusionPolicy
         var prefixRules =
             ReadRequiredRuleFile(prefixesPath);
 
+        if (string.IsNullOrWhiteSpace(runtimeBundlePath))
+        {
+            return new ExclusionPolicy(
+                hostRules,
+                prefixRules);
+        }
+
+        var runtimeRules =
+            RuntimeExclusionBundle.Load(
+                runtimeBundlePath);
+
         return new ExclusionPolicy(
-            hostRules,
-            prefixRules);
+            hostRules
+                .Concat(runtimeRules.HostRules)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            prefixRules
+                .Concat(runtimeRules.PrefixRules)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList());
     }
 
 

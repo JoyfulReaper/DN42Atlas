@@ -1,7 +1,9 @@
 using System.Security.Claims;
 using DN42Atlas.OptOut.Auth;
+using DN42Atlas.OptOut.Exclusions;
 using DN42Atlas.OptOut.Registry;
 using DN42Atlas.OptOut.Web;
+using DN42Atlas.Policy;
 using DN42Atlas.Registry;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -13,6 +15,45 @@ const string cookieScheme = "DN42Atlas.Cookie";
 const string oidcScheme = "Auth42";
 
 var builder = WebApplication.CreateBuilder(args);
+
+var maintenanceCommand = args.FirstOrDefault();
+
+if (maintenanceCommand is "exclusions-init" or "exclusions-materialize")
+{
+    try
+    {
+        var databasePath = RequiredSetting(
+            builder.Configuration,
+            "DN42ATLAS_EXCLUSION_DB_PATH");
+        var runtimeBundlePath = RequiredSetting(
+            builder.Configuration,
+            "DN42ATLAS_RUNTIME_EXCLUSIONS_PATH");
+
+        if (maintenanceCommand == "exclusions-init")
+        {
+            await ExclusionMaintenance.InitializeAsync(
+                databasePath,
+                runtimeBundlePath);
+            Console.WriteLine(
+                "Exclusion database and empty runtime policy initialized.");
+        }
+        else
+        {
+            await ExclusionMaintenance.MaterializeAsync(
+                databasePath,
+                runtimeBundlePath);
+            Console.WriteLine(
+                "Runtime exclusion policy materialized from active records.");
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine(ex.Message);
+        Environment.ExitCode = 1;
+    }
+
+    return;
+}
 
 var clientId = RequiredSetting(
     builder.Configuration,
@@ -26,6 +67,12 @@ var authority = RequiredSetting(
 var registryPath = RequiredSetting(
     builder.Configuration,
     "DN42ATLAS_REGISTRY_PATH");
+var exclusionDatabasePath = RequiredSetting(
+    builder.Configuration,
+    "DN42ATLAS_EXCLUSION_DB_PATH");
+var runtimeExclusionsPath = RequiredSetting(
+    builder.Configuration,
+    "DN42ATLAS_RUNTIME_EXCLUSIONS_PATH");
 var registryMaximumAgeHours = PositiveIntSetting(
     builder.Configuration,
     "DN42ATLAS_REGISTRY_MAX_AGE_HOURS",
@@ -33,6 +80,9 @@ var registryMaximumAgeHours = PositiveIntSetting(
 var registryDomainPath = Path.Combine(registryPath, "data", "dns");
 var registryIpv4Path = Path.Combine(registryPath, "data", "inetnum");
 var registryIpv6Path = Path.Combine(registryPath, "data", "inet6num");
+var exclusionStore = new ExclusionStore(exclusionDatabasePath);
+exclusionStore.ValidateExisting();
+_ = RuntimeExclusionBundle.Load(runtimeExclusionsPath);
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
@@ -51,6 +101,7 @@ builder.Services.AddSingleton(
     new RegistrySnapshotService(
         registryPath,
         TimeSpan.FromHours(registryMaximumAgeHours)));
+builder.Services.AddSingleton(exclusionStore);
 
 builder.Services
     .AddAuthentication(options =>

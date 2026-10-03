@@ -23,7 +23,8 @@ try
 
     var exclusionPolicy = ExclusionPolicy.Load(
         Path.Combine(Environment.CurrentDirectory, "config", "excluded-hosts.txt"),
-        Path.Combine(Environment.CurrentDirectory, "config", "excluded-prefixes.txt"));
+        Path.Combine(Environment.CurrentDirectory, "config", "excluded-prefixes.txt"),
+        Environment.GetEnvironmentVariable("DN42ATLAS_RUNTIME_EXCLUSIONS_PATH"));
     var probeTargets = HttpProbeTargets.All;
     var resolve = new ResolveCommand(new RegistryResolver(exclusionPolicy));
     var webScan = new WebScanCommand(new WebScanner(exclusionPolicy, probeTargets), probeTargets, exclusionPolicy);
