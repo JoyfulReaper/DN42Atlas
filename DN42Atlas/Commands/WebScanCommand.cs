@@ -7,7 +7,7 @@ namespace DN42Atlas.Commands;
 
 public sealed class WebScanCommand(WebScanner scanner, IReadOnlyList<(string, int)> probeTargets, ExclusionPolicy exclusionPolicy)
 {
-    public async Task ExecuteAsync(string[] args)
+    public async Task<string?> ExecuteAsync(string[] args)
     {
         var resolutionPath =
             args.Length > 1
@@ -19,7 +19,7 @@ public sealed class WebScanCommand(WebScanner scanner, IReadOnlyList<(string, in
             Console.WriteLine(
                 $"Resolution file not found: {resolutionPath}");
 
-            return;
+            return null;
         }
 
         Console.WriteLine(
@@ -163,6 +163,6 @@ public sealed class WebScanCommand(WebScanner scanner, IReadOnlyList<(string, in
         Console.WriteLine(
             $"Excluded by IP:   {excludedByPrefix}");
 
-        return;
+        return webOutputPath;
     }
 }

@@ -4,12 +4,12 @@ using DN42Atlas.Scanning;
 
 namespace DN42Atlas.Commands;
 
-public sealed class ResolveCommand(RegistryResolver resolver)
+public sealed class ResolveCommand(RegistryResolver resolver, string? registryDirectory = null)
 {
-    public async Task ExecuteAsync()
+    public async Task<string> ExecuteAsync()
     {
         var registryPath =
-            Path.Combine(
+            registryDirectory ?? Path.Combine(
                 Environment.GetFolderPath(
                     Environment.SpecialFolder
                         .UserProfile),
@@ -102,5 +102,6 @@ public sealed class ResolveCommand(RegistryResolver resolver)
             $"{resolutionOutputPath}");
 
 
+        return resolutionOutputPath;
     }
 }

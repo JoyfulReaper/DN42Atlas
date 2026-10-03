@@ -62,7 +62,7 @@ Discovered links are recorded for later analysis but are not automatically follo
 
 ## Complete Exclusion
 
-Atlas loads two required files from the current working directory before dispatching any command:
+Atlas loads two required files from the current working directory before executing any resolution, scan, probe, or report command. Help and unknown commands do not load configuration or perform network work:
 
 ```text
 config/excluded-hosts.txt
@@ -159,6 +159,8 @@ DN42Atlas/
     WebScanCommand.cs
     ProbeTestCommand.cs
     ReportCommand.cs
+    RunCommand.cs
+    CommandUsage.cs
   Scanning/
     RegistryResolver.cs
     RegistryResolutionResult.cs
@@ -192,7 +194,7 @@ config/
 `Probing/HttpProber.cs`, `Policy/ExclusionPolicy.cs`, the registry models/parser,
 and `Reporting/AtlasReportGenerator.cs` retain their existing responsibilities.
 Networking also validates probe destinations and pins HTTP connections; `PublicScanPolicy` filters public metadata and report inputs.
-Both exclusion files remain required before command dispatch. Registry hostname
+Both exclusion files remain required for every operational command. Registry hostname
 exclusions run before DNS; saved-resolution hostname exclusions, prefix exclusions,
 and the DN42 address guard run before web probing.
 
@@ -212,16 +214,31 @@ The CLI command structure is:
 
 ```text
 dn42atlas                              Registry parsing and DNS resolution
+dn42atlas resolve                      Explicit registry/DNS resolution
 dn42atlas web-scan [resolution-file]    HTTP/HTTPS scan from saved DNS results
 dn42atlas probe-test                    Single-host HTTP/HTTPS probe test
 dn42atlas report <web-probe.json>        HTML viewer from existing scan JSON
+dn42atlas run                           Resolve, scan fresh results, generate HTML
+dn42atlas --help | -h | help             Show usage without scanning
 ```
 
 The examples below use `dotnet run --project DN42Atlas` from the repository root. Generated resolution and scan files are written under the current working directory.
 
+Unknown commands print usage and exit with code 2. Missing report arguments also return 2; missing input files and other command failures return 1. Successful commands return 0. Individual DNS lookup failures and unreachable HTTP origins remain recorded scan outcomes rather than failing the entire command.
+
+### Combined Run
+
+```bash
+dotnet run --project DN42Atlas -- run
+```
+
+`run` resolves the registry into `domain-resolution.json`, passes that exact file to `web-scan`, and generates the corresponding HTML viewer through the existing web-scan report stage. It stops if a stage fails. It does not use the standalone web-scan default backup file, schedule future scans, or publish output.
+
+For unattended execution, set the working directory explicitly: exclusion files, relative input paths, `domain-resolution.json`, and `results/` depend on it. The registry is read from `~/dn42-registry/data/dns` for the account running Atlas. Commands currently have no pipeline-wide cancellation support. Resolution output overwrites its fixed filename; scan filenames use local start time to the second, so concurrent runs can collide. Output writes are not atomic publication. These limitations remain for future pipeline work.
+
 ### Registry / DNS Scan
 
-Running without arguments parses the registry and resolves registered `.dn42` domains:
+Running without arguments, or using `resolve`, parses the registry and resolves registered `.dn42` domains:
 
 ```bash
 dotnet run --project DN42Atlas

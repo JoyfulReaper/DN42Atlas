@@ -5,14 +5,14 @@ namespace DN42Atlas.Commands;
 
 public static class ReportCommand
 {
-    public static async Task ExecuteAsync(string[] args, ExclusionPolicy exclusionPolicy)
+    public static async Task<int> ExecuteAsync(string[] args, ExclusionPolicy exclusionPolicy)
     {
         if (args.Length < 2)
         {
             Console.WriteLine(
                 "Usage: report <web-probe.json>");
 
-            return;
+            return 2;
         }
 
         var inputPath =
@@ -23,7 +23,7 @@ public static class ReportCommand
             Console.WriteLine(
                 $"File not found: {inputPath}");
 
-            return;
+            return 1;
         }
 
         var htmlPath =
@@ -39,6 +39,6 @@ public static class ReportCommand
         Console.WriteLine(
             $"Atlas viewer written to: {htmlPath}");
 
-        return;
+        return 0;
     }
 }
