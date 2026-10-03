@@ -109,8 +109,18 @@ public sealed class RegistryWorkingTreeTests
                 timeProvider: new FixedTimeProvider(Now))
             .GetSnapshot();
 
-        public void Dispose() =>
+        public void Dispose()
+        {
+            foreach (var path in Directory.EnumerateFileSystemEntries(
+                Root,
+                "*",
+                SearchOption.AllDirectories))
+            {
+                File.SetAttributes(path, FileAttributes.Normal);
+            }
+
             Directory.Delete(Root, recursive: true);
+        }
 
         private void RunGit(params string[] arguments)
         {
