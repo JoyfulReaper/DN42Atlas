@@ -426,12 +426,12 @@ public static class AtlasReportGenerator
     </nav>
 
     <p class="hosting-note">
-        Infrastructure note:
+        Hosted on
         <a
             href="https://greencloudvps.com/billing/aff.php?aff=10295"
             target="_blank"
-            rel="sponsored noopener noreferrer">GreenCloud VPS</a>
-        is an affiliate link; the operator may earn a commission.
+            rel="sponsored noopener noreferrer">GreenCloud VPS</a>.
+        Affiliate link — I may earn a commission if you sign up.
     </p>
 </footer>
 

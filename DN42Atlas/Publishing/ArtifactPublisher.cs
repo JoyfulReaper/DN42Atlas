@@ -2,6 +2,13 @@ namespace DN42Atlas.Publishing;
 
 public static class ArtifactPublisher
 {
+    private static readonly (string FileName, string ResourceName)[] StaticFiles =
+    [
+        ("about.html", "DN42Atlas.site.about.html"),
+        ("opt-out.html", "DN42Atlas.site.opt-out.html"),
+        ("robots.txt", "DN42Atlas.site.robots.txt")
+    ];
+
     public static async Task PublishAsync(string scanPath, string publishedDirectory,
         CancellationToken cancellationToken = default)
     {
@@ -10,26 +17,35 @@ public static class ArtifactPublisher
         var id = Guid.NewGuid().ToString("N");
         var stagedJson = Path.Combine(publishedDirectory, $".latest-{id}.tmp");
         var stagedHtml = Path.Combine(publishedDirectory, $".index-{id}.tmp");
-        var stagedOptOut = Path.Combine(publishedDirectory, $".opt-out-{id}.tmp");
-        var optOutPath = Path.Combine(publishedDirectory, "opt-out.html");
+        var staticFiles = StaticFiles
+            .Select(file => (
+                file.ResourceName,
+                DestinationPath: Path.Combine(publishedDirectory, file.FileName),
+                StagedPath: Path.Combine(publishedDirectory, $".{file.FileName}-{id}.tmp")))
+            .ToArray();
         try
         {
             await StageAsync(scanPath, stagedJson, cancellationToken);
             await StageAsync(Path.ChangeExtension(scanPath, ".html"), stagedHtml, cancellationToken);
-            if (!File.Exists(optOutPath))
+
+            foreach (var file in staticFiles)
             {
-                await using var optOut = typeof(ArtifactPublisher).Assembly
-                    .GetManifestResourceStream("DN42Atlas.site.opt-out.html")
-                    ?? throw new InvalidOperationException("Bundled opt-out page is missing.");
-                await StageAsync(optOut, stagedOptOut, cancellationToken);
+                if (File.Exists(file.DestinationPath))
+                    continue;
+
+                await using var source = typeof(ArtifactPublisher).Assembly
+                    .GetManifestResourceStream(file.ResourceName)
+                    ?? throw new InvalidOperationException($"Bundled static file is missing: {file.ResourceName}");
+                await StageAsync(source, file.StagedPath, cancellationToken);
             }
+
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (File.Exists(stagedOptOut))
+            foreach (var file in staticFiles.Where(file => File.Exists(file.StagedPath)))
             {
-                // Never replace an operator-maintained page, including one created during staging.
-                try { File.Move(stagedOptOut, optOutPath, overwrite: false); }
-                catch (IOException) when (File.Exists(optOutPath)) { }
+                // Never replace an operator-maintained file, including one created during staging.
+                try { File.Move(file.StagedPath, file.DestinationPath, overwrite: false); }
+                catch (IOException) when (File.Exists(file.DestinationPath)) { }
             }
 
             // Both artifacts are complete before either stable name is replaced.
@@ -40,7 +56,8 @@ public static class ArtifactPublisher
         {
             File.Delete(stagedJson);
             File.Delete(stagedHtml);
-            File.Delete(stagedOptOut);
+            foreach (var file in staticFiles)
+                File.Delete(file.StagedPath);
         }
     }
 

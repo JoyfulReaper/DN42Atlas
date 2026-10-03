@@ -108,7 +108,9 @@ public sealed class PublicationTests
             html,
             "rel=\"sponsored noopener noreferrer\"");
         StringAssert.Contains(html, "target=\"_blank\"");
-        StringAssert.Contains(html, "is an affiliate link");
-        StringAssert.Contains(html, "the operator may earn a commission");
+        StringAssert.Contains(html, "Hosted on");
+        StringAssert.Contains(
+            html,
+            "Affiliate link — I may earn a commission if you sign up.");
     }
 }

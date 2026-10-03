@@ -24,11 +24,16 @@ public sealed class ArtifactPublisherTests
         Assert.AreEqual(await File.ReadAllTextAsync(nextHtml), await File.ReadAllTextAsync(Path.Combine(published, "index.html")));
         Assert.AreEqual("{\"Results\":[]}", await File.ReadAllTextAsync(json));
         Assert.AreEqual("<!doctype html><title>Atlas</title>", await File.ReadAllTextAsync(html));
-        Assert.HasCount(3, Directory.GetFiles(published));
+        Assert.HasCount(5, Directory.GetFiles(published));
+        var about = await File.ReadAllTextAsync(Path.Combine(published, "about.html"));
+        Assert.Contains("About DN42Atlas", about);
+        Assert.Contains("AS4242420425", about);
         var optOut = await File.ReadAllTextAsync(Path.Combine(published, "opt-out.html"));
         Assert.Contains("Opt out of DN42Atlas", optOut);
         Assert.Contains("https://github.com/JoyfulReaper/DN42Atlas/issues", optOut);
         Assert.Contains("href=\"index.html\"", optOut);
+        var robots = await File.ReadAllTextAsync(Path.Combine(published, "robots.txt"));
+        Assert.AreEqual("User-agent: *\nAllow: /\n", robots.ReplaceLineEndings("\n"));
     }
 
     [TestMethod]
@@ -43,8 +48,10 @@ public sealed class ArtifactPublisherTests
         byte[] customPage = [0xEF, 0xBB, 0xBF, 65, 66, 67, 13, 10];
         await File.WriteAllBytesAsync(optOut, customPage);
         var about = Path.Combine(published, "about.html");
+        var robots = Path.Combine(published, "robots.txt");
         var css = Path.Combine(published, "site.css");
         await File.WriteAllTextAsync(about, "manual about page");
+        await File.WriteAllTextAsync(robots, "manual robots policy");
         await File.WriteAllTextAsync(css, "manual styles");
         for (var i = 0; i < 2; i++)
         {
@@ -52,10 +59,11 @@ public sealed class ArtifactPublisherTests
             await ArtifactPublisher.PublishAsync(json, published);
             CollectionAssert.AreEqual(customPage, await File.ReadAllBytesAsync(optOut));
             Assert.AreEqual("manual about page", await File.ReadAllTextAsync(about));
+            Assert.AreEqual("manual robots policy", await File.ReadAllTextAsync(robots));
             Assert.AreEqual("manual styles", await File.ReadAllTextAsync(css));
             Assert.AreEqual($"report {i}", await File.ReadAllTextAsync(Path.Combine(published, "index.html")));
         }
-        Assert.HasCount(5, Directory.GetFiles(published));
+        Assert.HasCount(6, Directory.GetFiles(published));
     }
 
     [TestMethod]
