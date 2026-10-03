@@ -4,6 +4,7 @@ public enum RegistrySnapshotStatus
 {
     Fresh,
     Stale,
+    Dirty,
     Unknown
 }
 

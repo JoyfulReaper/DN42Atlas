@@ -112,6 +112,7 @@ public static class OptOutPage
             {
                 RegistrySnapshotStatus.Fresh => "Fresh",
                 RegistrySnapshotStatus.Stale => "STALE",
+                RegistrySnapshotStatus.Dirty => "DIRTY",
                 _ => "UNKNOWN"
             });
         content.Append("</dl>");
@@ -119,6 +120,10 @@ public static class OptOutPage
         if (snapshot.Status == RegistrySnapshotStatus.Stale)
         {
             content.Append("<p><strong>Automatic opt-out approval is disabled until the registry is refreshed.</strong></p>");
+        }
+        else if (snapshot.Status == RegistrySnapshotStatus.Dirty)
+        {
+            content.Append("<p><strong>The registry working tree is modified. Automatic opt-out approval is disabled.</strong></p>");
         }
         else if (snapshot.Status == RegistrySnapshotStatus.Unknown)
         {

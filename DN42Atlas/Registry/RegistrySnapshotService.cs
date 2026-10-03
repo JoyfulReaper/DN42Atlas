@@ -46,13 +46,19 @@ public sealed class RegistrySnapshotService
                 observation.CommitSha,
                 StringComparison.OrdinalIgnoreCase))
         {
-            return Unknown(repository);
+            return repository.IsWorkingTreeClean
+                ? Unknown(repository)
+                : Dirty(repository);
         }
 
         var age = timeProvider.GetUtcNow() - observation.ObservedAt.ToUniversalTime();
 
         if (age < TimeSpan.Zero)
-            return Unknown(repository);
+        {
+            return repository.IsWorkingTreeClean
+                ? Unknown(repository)
+                : Dirty(repository);
+        }
 
         return new RegistrySnapshot(
             registryRoot,
@@ -60,9 +66,11 @@ public sealed class RegistrySnapshotService
             repository.CommitTimestamp,
             observation.ObservedAt.ToUniversalTime(),
             age,
-            age <= maximumAge
-                ? RegistrySnapshotStatus.Fresh
-                : RegistrySnapshotStatus.Stale);
+            !repository.IsWorkingTreeClean
+                ? RegistrySnapshotStatus.Dirty
+                : age <= maximumAge
+                    ? RegistrySnapshotStatus.Fresh
+                    : RegistrySnapshotStatus.Stale);
     }
 
     private RegistrySnapshot Unknown(
@@ -74,4 +82,14 @@ public sealed class RegistrySnapshotService
             null,
             null,
             RegistrySnapshotStatus.Unknown);
+
+    private RegistrySnapshot Dirty(
+        RegistryRepositoryState repository) =>
+        new(
+            registryRoot,
+            repository.CommitSha,
+            repository.CommitTimestamp,
+            null,
+            null,
+            RegistrySnapshotStatus.Dirty);
 }

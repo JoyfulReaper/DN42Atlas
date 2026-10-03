@@ -164,7 +164,8 @@ public sealed class RegistrySnapshotServiceTests
                         30,
                         0,
                         TimeSpan.Zero),
-                    GitDirectory));
+                    GitDirectory,
+                    IsWorkingTreeClean: true));
         }
 
         public string GitDirectory { get; }

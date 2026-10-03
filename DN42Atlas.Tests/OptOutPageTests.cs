@@ -70,6 +70,27 @@ public sealed class OptOutPageTests
             html);
     }
 
+    [TestMethod]
+    public void DashboardRendersDirtyRegistryWarning()
+    {
+        var snapshot = FreshSnapshot() with
+        {
+            Status = RegistrySnapshotStatus.Dirty
+        };
+
+        var html = OptOutPage.RenderSignedIn(
+            Identity(),
+            [],
+            [],
+            [],
+            snapshot);
+
+        Assert.Contains("DIRTY", html);
+        Assert.Contains(
+            "The registry working tree is modified. Automatic opt-out approval is disabled.",
+            html);
+    }
+
     private static Auth42Identity Identity() =>
         new("subject", "JOYFULREAPER-MNT", 4242420425);
 

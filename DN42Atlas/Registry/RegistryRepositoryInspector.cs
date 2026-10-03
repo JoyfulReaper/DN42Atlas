@@ -7,7 +7,8 @@ namespace DN42Atlas.Registry;
 public sealed record RegistryRepositoryState(
     string CommitSha,
     DateTimeOffset? CommitTimestamp,
-    string GitDirectory);
+    string GitDirectory,
+    bool IsWorkingTreeClean);
 
 public interface IRegistryRepositoryInspector
 {
@@ -54,11 +55,17 @@ public sealed class GitRegistryRepositoryInspector :
                 configuredRoot,
                 "rev-parse",
                 "--absolute-git-dir");
+            var status = GitProcess.Run(
+                configuredRoot,
+                "status",
+                "--porcelain",
+                "--untracked-files=all");
 
             if (!commit.Succeeded ||
                 !IsCommitSha(commit.Output) ||
                 !gitDirectory.Succeeded ||
-                string.IsNullOrWhiteSpace(gitDirectory.Output))
+                string.IsNullOrWhiteSpace(gitDirectory.Output) ||
+                !status.Succeeded)
             {
                 return false;
             }
@@ -84,7 +91,8 @@ public sealed class GitRegistryRepositoryInspector :
             state = new RegistryRepositoryState(
                 commit.Output,
                 commitTimestamp,
-                Path.GetFullPath(gitDirectory.Output));
+                Path.GetFullPath(gitDirectory.Output),
+                string.IsNullOrEmpty(status.Output));
 
             return true;
         }
