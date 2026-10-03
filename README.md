@@ -103,6 +103,32 @@ From the repository root:
 dotnet build DN42Atlas/DN42Atlas.csproj
 ```
 
+## Architecture and Tests
+
+`Program.cs` loads the required exclusion policy and shared HTTP target list, then
+dispatches to `ResolveCommand`, `WebScanCommand`, `ProbeTestCommand`, or
+`ReportCommand` in `Commands/`. Commands own CLI input, output files, and summaries.
+`Scanning/RegistryResolver.cs` parses registry objects and resolves DNS;
+`Scanning/WebScanner.cs` filters saved resolutions and coordinates HTTP probes.
+Their result records carry data back to the commands without changing the public
+JSON schema. `Networking/Dn42AddressSpace.cs` holds the existing address guard.
+
+`Probing/HttpProber.cs`, `Policy/ExclusionPolicy.cs`, the registry models/parser,
+and `Reporting/AtlasReportGenerator.cs` retain their existing responsibilities.
+Both exclusion files remain required before command dispatch. Registry hostname
+exclusions run before DNS; saved-resolution hostname exclusions, prefix exclusions,
+and the DN42 address guard run before web probing.
+
+Run the automated tests from the repository root:
+
+```bash
+dotnet test
+```
+
+Tests use temporary fixtures and fake DNS/probe functions; they do not contact DN42
+or external services. MSTest is used only by the test project; CIDR matching uses
+the existing implementation without additional networking packages.
+
 ## Commands
 
 ### Registry / DNS Scan
