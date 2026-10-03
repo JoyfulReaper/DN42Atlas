@@ -60,9 +60,48 @@ If `robots.txt` cannot be evaluated safely, Atlas does not fetch the homepage.
 
 Discovered links are recorded for later analysis but are not automatically followed.
 
+## Complete Exclusion
+
+Atlas loads two required files from the current working directory before dispatching any command:
+
+```text
+config/excluded-hosts.txt
+config/excluded-prefixes.txt
+```
+
+Keep both files present, even if they contain no rules. If either file is missing, Atlas fails closed: it stops rather than continuing without exclusions. Malformed CIDR rules also stop startup.
+
+Use one rule per line. Blank lines are ignored, and `#` starts a comment, including after a rule.
+
+Hostname rules go in `config/excluded-hosts.txt`, for example:
+
+```text
+example.dn42        # this exact hostname
+*.private.dn42     # descendants of private.dn42
+```
+
+Exact rules match only the named host. Wildcard rules match both `foo.private.dn42` and `bar.foo.private.dn42`, but do not match the bare parent `private.dn42`. Add a separate exact rule to exclude the parent too. Matching ignores case, surrounding whitespace, and a trailing dot.
+
+IPv4 and IPv6 CIDR rules go in `config/excluded-prefixes.txt`, for example:
+
+```text
+172.20.16.0/20
+fd42:1234::/48
+```
+
+During the default registry/DNS command, hostname exclusions are checked before DNS resolution. If any resolved address matches an excluded prefix, the entire domain is omitted from `domain-resolution.json`.
+
+`web-scan` checks hostname exclusions again when loading an existing resolution file. It then checks every saved address against prefix exclusions before probing. A hostname match or any matching address skips the entire domain: excluded scan targets are not probed and do not appear as service results in the scan JSON or its generated viewer.
+
+The public scan JSON records `ExcludedByHostname` and `ExcludedByPrefix` counts, without publishing the matched excluded hostnames or prefix rules. Console diagnostics can include the matched hostname, address, and rule.
+
+`robots.txt` controls HTTP page-content fetching. Atlas still requests `/robots.txt` and can record the origin and robots status when homepage fetching is disallowed. Complete exclusion removes the target from the scan entirely, before those HTTP requests.
+
+These filters apply to registry resolution and `web-scan` targets. The development-only `probe-test` directly probes its fixed host without applying hostname, prefix, or DN42 address filters. `report` renders the supplied JSON without reapplying exclusions; changing the policy does not remove entries from old scan files. Links and hostname mentions extracted from allowed pages are references, not probe targets, and are not filtered by the exclusion policy.
+
 ## DN42 Address Guard
 
-Before probing a resolved `.dn42` hostname, Atlas verifies that its addresses fall within expected DN42 address space.
+Before probing a hostname from a resolution file, `web-scan` verifies that all its saved addresses fall within expected DN42 address space.
 
 Currently accepted ranges include:
 
@@ -74,7 +113,7 @@ Currently accepted ranges include:
 fd00::/8
 ```
 
-Domains resolving outside these ranges are skipped rather than allowing DNS records to direct the scanner onto arbitrary clearnet hosts.
+Domains with any address outside these ranges, including mixed DN42/external results, are skipped rather than allowing DNS records to direct the scanner onto arbitrary clearnet hosts.
 
 ## Requirements
 
@@ -82,6 +121,9 @@ Domains resolving outside these ranges are skipped rather than allowing DNS reco
 - access to DN42
 - a DNS resolver capable of resolving `.dn42`
 - a local checkout of the DN42 registry
+- both exclusion files in `config/` under the current working directory
+
+The local registry checkout is needed for the default resolution command. Resolution and probing need access to DN42; `web-scan` reads saved DNS results instead of the registry. Generating a report from an existing JSON file does not need network access, but still requires both exclusion files at startup.
 
 The registry is currently expected at:
 
@@ -105,13 +147,42 @@ dotnet build DN42Atlas/DN42Atlas.csproj
 
 ## Architecture and Tests
 
-`Program.cs` loads the required exclusion policy and shared HTTP target list, then
-dispatches to `ResolveCommand`, `WebScanCommand`, `ProbeTestCommand`, or
-`ReportCommand` in `Commands/`. Commands own CLI input, output files, and summaries.
-`Scanning/RegistryResolver.cs` parses registry objects and resolves DNS;
-`Scanning/WebScanner.cs` filters saved resolutions and coordinates HTTP probes.
-Their result records carry data back to the commands without changing the public
-JSON schema. `Networking/Dn42AddressSpace.cs` holds the existing address guard.
+The project is split by responsibility:
+
+```text
+DN42Atlas/
+  Program.cs
+  Commands/
+    ResolveCommand.cs
+    WebScanCommand.cs
+    ProbeTestCommand.cs
+    ReportCommand.cs
+  Scanning/
+    RegistryResolver.cs
+    RegistryResolutionResult.cs
+    WebScanner.cs
+    WebScanResult.cs
+  Networking/
+    Dn42AddressSpace.cs
+  Probing/
+    HttpProber.cs
+    HttpProbeTargets.cs
+  Policy/
+    ExclusionPolicy.cs
+  Registry/
+    DomainParser.cs
+    DomainObject.cs
+    DomainResolution.cs
+    HttpProbeResult.cs
+  Reporting/
+    AtlasReportGenerator.cs
+DN42Atlas.Tests/
+config/
+  excluded-hosts.txt
+  excluded-prefixes.txt
+```
+
+`Program.cs` loads the required exclusion policy and shared HTTP target list, then dispatches commands. Commands handle CLI arguments, output files, report generation, and summaries. `RegistryResolver` parses registry objects and resolves DNS; `WebScanner` filters saved resolutions and coordinates HTTP probes with concurrency limited to 32. Their result records carry data back to the commands without changing the public JSON schema. `Dn42AddressSpace` holds the address guard.
 
 `Probing/HttpProber.cs`, `Policy/ExclusionPolicy.cs`, the registry models/parser,
 and `Reporting/AtlasReportGenerator.cs` retain their existing responsibilities.
@@ -130,6 +201,17 @@ or external services. MSTest is used only by the test project; CIDR matching use
 the existing implementation without additional networking packages.
 
 ## Commands
+
+The CLI command structure is:
+
+```text
+dn42atlas                              Registry parsing and DNS resolution
+dn42atlas web-scan [resolution-file]    HTTP/HTTPS scan from saved DNS results
+dn42atlas probe-test                    Single-host HTTP/HTTPS probe test
+dn42atlas report <web-probe.json>        HTML viewer from existing scan JSON
+```
+
+The examples below use `dotnet run --project DN42Atlas` from the repository root. Generated resolution and scan files are written under the current working directory.
 
 ### Registry / DNS Scan
 
@@ -154,6 +236,8 @@ dotnet run --project DN42Atlas -- probe-test
 ```
 
 This is useful for checking HTTP probing, TLS handling, robots parsing, homepage metadata extraction, and link discovery before running a full scan.
+
+Results are printed to the console; this command does not write scan JSON or an HTML viewer. It requires both exclusion files at startup, but directly probes `burble.dn42` without the scan filters described above.
 
 ### Web Scan
 
@@ -193,6 +277,8 @@ The scan also generates a corresponding HTML viewer:
 results/web-probe-20261003-002948.html
 ```
 
+The filename timestamp comes from the scan's local start time. Results are ordered by domain, scheme, then port.
+
 To preserve console output as well:
 
 ```bash
@@ -205,6 +291,8 @@ dotnet run --project DN42Atlas -- web-scan \
 ## Generate a Viewer From an Existing Scan
 
 You do not need to rescan the network to generate the HTML viewer.
+
+The command is `report <web-probe.json>`. It uses the supplied results as-is and writes an HTML file alongside the JSON with the same basename.
 
 ```bash
 dotnet run --project DN42Atlas -- \
@@ -296,8 +384,7 @@ When homepage access is permitted, Atlas currently extracts:
 - HTML `href` links
 - plain HTTP URLs
 - HTTPS URLs
-- Gopher URLs
-- Gemini URLs
+- other supported URL text found in page content
 - `.dn42` hostname mentions
 
 Relative links are resolved against the source origin.
@@ -317,9 +404,11 @@ DN42 mentions:           250
 
 The JSON records when these limits caused truncation.
 
+Recording a link does not mean Atlas probes its protocol. Discovery records references from HTTP/HTTPS pages; links are not automatically followed.
+
 ## Current Scope
 
-DN42Atlas is currently focused on HTTP/HTTPS discovery.
+DN42Atlas currently probes HTTP/HTTPS services only.
 
 Planned or possible future work includes:
 
