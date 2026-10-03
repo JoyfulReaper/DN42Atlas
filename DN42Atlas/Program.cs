@@ -1,7 +1,42 @@
 ﻿using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
+using DN42Atlas.Probing;
 using DN42Atlas.Registry;
+
+if (args.Length > 0 && args[0] == "probe-test")
+{
+    var probeTargets = new[]
+    {
+        ("http", 80),
+        ("https", 443),
+        ("http", 8080),
+        ("https", 8443),
+        ("http", 8000),
+        ("http", 8888),
+        ("http", 3000),
+        ("http", 5000)
+    };
+
+    var tasks = probeTargets.Select(x =>
+        HttpProber.ProbeAsync("burble.dn42", x.Item1, x.Item2));
+
+    var results = await Task.WhenAll(tasks);
+
+    foreach (var result in results)
+    {
+        Console.WriteLine(
+            $"{result.Scheme}://{result.Domain}:{result.Port} " +
+            $"reachable={result.Reachable} " +
+            $"robotsHttp={result.RobotsStatusCode} " +
+            $"robots={result.Robots} " +
+            $"redirect={result.RedirectLocation} " +
+            $"allowed={result.RobotsAllowed} " +
+            $"error={result.Error}");
+    }
+
+    return;
+}
 
 var registryPath = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
