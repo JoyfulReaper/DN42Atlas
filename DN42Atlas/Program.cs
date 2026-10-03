@@ -23,6 +23,10 @@ foreach (var file in Directory.EnumerateFiles(registryPath))
     }
 }
 
+domains = domains
+    .Where(x => x.Domain.EndsWith(".dn42", StringComparison.OrdinalIgnoreCase))
+    .ToList();
+
 Console.WriteLine($"Registered domains: {domains.Count}");
 Console.WriteLine();
 
