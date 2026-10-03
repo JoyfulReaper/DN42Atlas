@@ -6,6 +6,7 @@ using System.Text.Json;
 using DN42Atlas.Probing;
 using DN42Atlas.Registry;
 using DN42Atlas.Reporting;
+using DN42Atlas.Policy;
 
 var probeTargets = new[]
 {
@@ -36,6 +37,16 @@ var probeTargets = new[]
     ("https", 10443)
 };
 
+var exclusionPolicy =
+    ExclusionPolicy.Load(
+        Path.Combine(
+            Environment.CurrentDirectory,
+            "config",
+            "excluded-hosts.txt"),
+        Path.Combine(
+            Environment.CurrentDirectory,
+            "config",
+            "excluded-prefixes.txt"));
 
 //
 // Generate an HTML Atlas viewer from an existing
@@ -159,6 +170,9 @@ if (args.Length > 0 &&
     var skippedExternal =
         new List<string>();
 
+    var excludedByHostname = 0;
+    var excludedByPrefix = 0;
+
     foreach (var item in
         resolutionDocument
             .RootElement
@@ -180,10 +194,17 @@ if (args.Length > 0 &&
             continue;
         }
 
-        if (!domain.EndsWith(
-            ".dn42",
-            StringComparison.OrdinalIgnoreCase))
+        if (exclusionPolicy.IsHostExcluded(
+            domain,
+            out var hostExclusionRule))
         {
+            excludedByHostname++;
+
+            Console.WriteLine(
+                $"[exclude] {domain} " +
+                $"matched host rule " +
+                $"{hostExclusionRule}");
+
             continue;
         }
 
@@ -205,6 +226,40 @@ if (args.Length > 0 &&
 
         if (addresses.Count == 0)
             continue;
+
+        string? matchedPrefixRule = null;
+        string? matchedExcludedAddress = null;
+
+        foreach (var address in addresses)
+        {
+            if (!exclusionPolicy.IsAddressExcluded(
+                address,
+                out var rule))
+            {
+                continue;
+            }
+
+            matchedExcludedAddress =
+                address;
+
+            matchedPrefixRule =
+                rule;
+
+            break;
+        }
+
+        if (matchedExcludedAddress != null)
+        {
+            excludedByPrefix++;
+
+            Console.WriteLine(
+                $"[exclude] {domain} " +
+                $"resolved to {matchedExcludedAddress}, " +
+                $"matched prefix rule " +
+                $"{matchedPrefixRule}");
+
+            continue;
+        }
 
         //
         // Safety guard:
@@ -397,6 +452,12 @@ if (args.Length > 0 &&
                 SkippedExternalOrMixedDomains =
                     skippedExternal,
 
+                ExcludedByHostname =
+                    excludedByHostname,
+
+                ExcludedByPrefix =
+                    excludedByPrefix,
+
                 ProbeTargetCount =
                     work.Count,
 
@@ -473,6 +534,12 @@ if (args.Length > 0 &&
     Console.WriteLine(
         $"Viewer:            {viewerOutputPath}");
 
+    Console.WriteLine(
+        $"Excluded by host: {excludedByHostname}");
+
+    Console.WriteLine(
+        $"Excluded by IP:   {excludedByPrefix}");
+
     return;
 }
 
@@ -519,6 +586,28 @@ registryDomains =
                     StringComparison.OrdinalIgnoreCase))
         .ToList();
 
+var excludedRegistryHosts =
+    registryDomains
+        .Where(
+            x =>
+                exclusionPolicy.IsHostExcluded(
+                    x.Domain))
+        .Select(
+            x => x.Domain)
+        .ToList();
+
+registryDomains =
+    registryDomains
+        .Where(
+            x =>
+                !exclusionPolicy.IsHostExcluded(
+                    x.Domain))
+        .ToList();
+
+Console.WriteLine(
+    $"Excluded before DNS: " +
+    $"{excludedRegistryHosts.Count}");
+
 Console.WriteLine(
     $"Registered domains: " +
     $"{registryDomains.Count}");
@@ -537,6 +626,22 @@ foreach (var domain in
         var addresses =
             await Dns.GetHostAddressesAsync(
                 domain.Domain);
+
+        var excludedAddress =
+            addresses.FirstOrDefault(
+                address =>
+                    exclusionPolicy.IsAddressExcluded(
+                        address));
+
+        if (excludedAddress != null)
+        {
+            Console.WriteLine(
+                $"[exclude] {domain.Domain} " +
+                $"resolved to excluded address " +
+                $"{excludedAddress}");
+
+            continue;
+        }
 
         var result =
             new DomainResolution
