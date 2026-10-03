@@ -9,4 +9,13 @@ Configure the application with:
 - `DN42ATLAS_OIDC_AUTHORITY` (currently `https://auth.iedon.net`)
 - `DN42ATLAS_REGISTRY_PATH` (the root of a local DN42 registry checkout)
 
-The configured registry checkout must contain its domain objects under `data/dns`. The registered OIDC callback is `/signin-oidc`; production deployments should publish it through HTTPS. The client secret must be supplied through deployment configuration and must not be committed.
+The configured registry checkout must contain its domain objects under `data/dns`. The operator dashboard is served at `/operator`, and the registered OIDC callback remains `/signin-oidc`. The client secret must be supplied through deployment configuration and must not be committed.
+
+In production, nginx should proxy only these application routes:
+
+- `/operator`
+- `/login`
+- `/logout`
+- `/signin-oidc`
+
+All other paths on `dn42atlas.dn42`, including `/`, should continue to be served by the static site. Publish the proxied routes through HTTPS so OIDC redirects and secure cookies work correctly.

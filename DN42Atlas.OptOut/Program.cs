@@ -110,7 +110,7 @@ app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapGet("/", (
+app.MapGet("/operator", (
     ClaimsPrincipal principal,
     RegistryDomainCatalog registry) =>
 {
@@ -131,12 +131,12 @@ app.MapGet("/", (
 
 app.MapGet("/login", () =>
     Results.Challenge(
-        new AuthenticationProperties { RedirectUri = "/" },
+        new AuthenticationProperties { RedirectUri = "/operator" },
         [oidcScheme]));
 
 app.MapGet("/logout", () =>
     Results.SignOut(
-        new AuthenticationProperties { RedirectUri = "/" },
+        new AuthenticationProperties { RedirectUri = "/operator" },
         [cookieScheme, oidcScheme]));
 
 app.Run();
