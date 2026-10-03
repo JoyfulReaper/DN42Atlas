@@ -19,7 +19,9 @@ public static class OptOutPage
 
     public static string RenderSignedIn(
         Auth42Identity identity,
-        IReadOnlyList<string> domains)
+        IReadOnlyList<string> domains,
+        IReadOnlyList<string> ipv4Prefixes,
+        IReadOnlyList<string> ipv6Prefixes)
     {
         var encoder = HtmlEncoder.Default;
         var content = new StringBuilder();
@@ -31,23 +33,25 @@ public static class OptOutPage
         content.Append(identity.Asn);
         content.Append("</p><h2>Domains you can manage</h2>");
 
-        if (domains.Count == 0)
-        {
-            content.Append("<p>No matching registered .dn42 domains were found.</p>");
-        }
-        else
-        {
-            content.Append("<ul>");
+        AppendList(
+            content,
+            encoder,
+            domains,
+            "No matching registered .dn42 domains were found.");
 
-            foreach (var domain in domains)
-            {
-                content.Append("<li>");
-                content.Append(encoder.Encode(domain));
-                content.Append("</li>");
-            }
+        content.Append("<h2>IPv4 prefixes you can manage</h2>");
+        AppendList(
+            content,
+            encoder,
+            ipv4Prefixes,
+            "No matching IPv4 allocations were found.");
 
-            content.Append("</ul>");
-        }
+        content.Append("<h2>IPv6 prefixes you can manage</h2>");
+        AppendList(
+            content,
+            encoder,
+            ipv6Prefixes,
+            "No matching IPv6 allocations were found.");
 
         content.Append("<p>This first release is read-only. Exclusion controls are not available yet.</p>");
         content.Append("<p><a href=\"/logout\">Logout</a></p>");
@@ -55,6 +59,32 @@ public static class OptOutPage
         return Layout(
             "DN42Atlas operator self-service",
             content.ToString());
+    }
+
+    private static void AppendList(
+        StringBuilder content,
+        HtmlEncoder encoder,
+        IReadOnlyList<string> values,
+        string emptyMessage)
+    {
+        if (values.Count == 0)
+        {
+            content.Append("<p>");
+            content.Append(encoder.Encode(emptyMessage));
+            content.Append("</p>");
+            return;
+        }
+
+        content.Append("<ul>");
+
+        foreach (var value in values)
+        {
+            content.Append("<li>");
+            content.Append(encoder.Encode(value));
+            content.Append("</li>");
+        }
+
+        content.Append("</ul>");
     }
 
     private static string Layout(string title, string content)

@@ -26,6 +26,8 @@ var registryPath = RequiredSetting(
     builder.Configuration,
     "DN42ATLAS_REGISTRY_PATH");
 var registryDomainPath = Path.Combine(registryPath, "data", "dns");
+var registryIpv4Path = Path.Combine(registryPath, "data", "inetnum");
+var registryIpv6Path = Path.Combine(registryPath, "data", "inet6num");
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
@@ -36,6 +38,10 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 
 builder.Services.AddSingleton(
     new RegistryDomainCatalog(registryDomainPath));
+builder.Services.AddSingleton(
+    new RegistryAllocationCatalog(
+        registryIpv4Path,
+        registryIpv6Path));
 
 builder.Services
     .AddAuthentication(options =>
@@ -112,7 +118,8 @@ app.UseAuthorization();
 
 app.MapGet("/operator", (
     ClaimsPrincipal principal,
-    RegistryDomainCatalog registry) =>
+    RegistryDomainCatalog domains,
+    RegistryAllocationCatalog allocations) =>
 {
     if (principal.Identity?.IsAuthenticated != true)
         return Results.Content(
@@ -122,10 +129,17 @@ app.MapGet("/operator", (
     if (!Auth42Identity.TryFromPrincipal(principal, out var identity))
         return Results.Unauthorized();
 
-    var domains = registry.FindDomains(identity!.ActiveMaintainer);
+    var maintainedDomains =
+        domains.FindDomains(identity!.ActiveMaintainer);
+    var maintainedAllocations =
+        allocations.FindAllocations(identity.ActiveMaintainer);
 
     return Results.Content(
-        OptOutPage.RenderSignedIn(identity, domains),
+        OptOutPage.RenderSignedIn(
+            identity,
+            maintainedDomains,
+            maintainedAllocations.Ipv4Prefixes,
+            maintainedAllocations.Ipv6Prefixes),
         "text/html; charset=utf-8");
 });
 

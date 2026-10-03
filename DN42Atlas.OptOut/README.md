@@ -1,6 +1,6 @@
 # DN42Atlas operator self-service
 
-`DN42Atlas.OptOut` is the read-only first slice of the operator self-service application. It authenticates with Auth42 and lists exact registered `.dn42` domain objects whose `mnt-by` value matches the authenticated maintainer. It does not create exclusions or change Atlas data.
+`DN42Atlas.OptOut` is the read-only operator self-service application. It authenticates with Auth42 and lists exact registered `.dn42` domain objects and `inetnum`/`inet6num` allocations whose `mnt-by` value matches the authenticated maintainer. It does not create exclusions or change Atlas data.
 
 Configure the application with:
 

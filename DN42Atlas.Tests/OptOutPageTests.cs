@@ -14,11 +14,17 @@ public sealed class OptOutPageTests
                 "subject",
                 "<script>alert(1)</script>-MNT",
                 4242420425),
-            ["<img src=x onerror=alert(1)>.dn42"]);
+            ["<img src=x onerror=alert(1)>.dn42"],
+            ["<b>172.20.220.48/28</b>"],
+            ["<i>fdf0:e12c:5528::/48</i>"]);
 
         Assert.DoesNotContain("<script>alert(1)</script>", html);
         Assert.DoesNotContain("<img src=x onerror=alert(1)>", html);
         Assert.Contains("&lt;script&gt;alert(1)&lt;/script&gt;-MNT", html);
         Assert.Contains("&lt;img src=x onerror=alert(1)&gt;.dn42", html);
+        Assert.Contains("IPv4 prefixes you can manage", html);
+        Assert.Contains("&lt;b&gt;172.20.220.48/28&lt;/b&gt;", html);
+        Assert.Contains("IPv6 prefixes you can manage", html);
+        Assert.Contains("&lt;i&gt;fdf0:e12c:5528::/48&lt;/i&gt;", html);
     }
 }
