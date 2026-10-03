@@ -10,7 +10,7 @@ if (command is "--help" or "-h" or "help")
     return 0;
 }
 
-if (command is not ("resolve" or "web-scan" or "report" or "probe-test" or "run"))
+if (command is not ("resolve" or "web-scan" or "report" or "probe-test" or "run" or "registry-update"))
 {
     CommandUsage.Print();
     return 2;
@@ -18,6 +18,9 @@ if (command is not ("resolve" or "web-scan" or "report" or "probe-test" or "run"
 
 try
 {
+    if (command == "registry-update")
+        return await RegistryUpdateCommand.ExecuteAsync();
+
     var exclusionPolicy = ExclusionPolicy.Load(
         Path.Combine(Environment.CurrentDirectory, "config", "excluded-hosts.txt"),
         Path.Combine(Environment.CurrentDirectory, "config", "excluded-prefixes.txt"));

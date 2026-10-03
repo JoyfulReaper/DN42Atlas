@@ -2,6 +2,7 @@ using System.Security.Claims;
 using DN42Atlas.OptOut.Auth;
 using DN42Atlas.OptOut.Registry;
 using DN42Atlas.OptOut.Web;
+using DN42Atlas.Registry;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
@@ -25,6 +26,10 @@ var authority = RequiredSetting(
 var registryPath = RequiredSetting(
     builder.Configuration,
     "DN42ATLAS_REGISTRY_PATH");
+var registryMaximumAgeHours = PositiveIntSetting(
+    builder.Configuration,
+    "DN42ATLAS_REGISTRY_MAX_AGE_HOURS",
+    defaultValue: 72);
 var registryDomainPath = Path.Combine(registryPath, "data", "dns");
 var registryIpv4Path = Path.Combine(registryPath, "data", "inetnum");
 var registryIpv6Path = Path.Combine(registryPath, "data", "inet6num");
@@ -42,6 +47,10 @@ builder.Services.AddSingleton(
     new RegistryAllocationCatalog(
         registryIpv4Path,
         registryIpv6Path));
+builder.Services.AddSingleton(
+    new RegistrySnapshotService(
+        registryPath,
+        TimeSpan.FromHours(registryMaximumAgeHours)));
 
 builder.Services
     .AddAuthentication(options =>
@@ -119,7 +128,8 @@ app.UseAuthorization();
 app.MapGet("/operator", (
     ClaimsPrincipal principal,
     RegistryDomainCatalog domains,
-    RegistryAllocationCatalog allocations) =>
+    RegistryAllocationCatalog allocations,
+    RegistrySnapshotService snapshots) =>
 {
     if (principal.Identity?.IsAuthenticated != true)
         return Results.Content(
@@ -129,17 +139,34 @@ app.MapGet("/operator", (
     if (!Auth42Identity.TryFromPrincipal(principal, out var identity))
         return Results.Unauthorized();
 
-    var maintainedDomains =
-        domains.FindDomains(identity!.ActiveMaintainer);
-    var maintainedAllocations =
-        allocations.FindAllocations(identity.ActiveMaintainer);
+    var snapshot = snapshots.GetSnapshot();
+    IReadOnlyList<string> maintainedDomains;
+    MaintainedAllocations maintainedAllocations;
+    var ownershipAvailable = true;
+
+    try
+    {
+        maintainedDomains =
+            domains.FindDomains(identity!.ActiveMaintainer);
+        maintainedAllocations =
+            allocations.FindAllocations(identity.ActiveMaintainer);
+    }
+    catch (Exception ex) when (
+        ex is IOException or UnauthorizedAccessException)
+    {
+        maintainedDomains = [];
+        maintainedAllocations = new MaintainedAllocations([], []);
+        ownershipAvailable = false;
+    }
 
     return Results.Content(
         OptOutPage.RenderSignedIn(
-            identity,
+            identity!,
             maintainedDomains,
             maintainedAllocations.Ipv4Prefixes,
-            maintainedAllocations.Ipv6Prefixes),
+            maintainedAllocations.Ipv6Prefixes,
+            snapshot,
+            ownershipAvailable),
         "text/html; charset=utf-8");
 });
 
@@ -166,6 +193,23 @@ static string RequiredSetting(
             $"Required configuration value '{name}' is missing.");
 
     return value;
+}
+
+static int PositiveIntSetting(
+    IConfiguration configuration,
+    string name,
+    int defaultValue)
+{
+    var value = configuration[name];
+
+    if (string.IsNullOrWhiteSpace(value))
+        return defaultValue;
+
+    if (!int.TryParse(value, out var parsed) || parsed <= 0)
+        throw new InvalidOperationException(
+            $"Configuration value '{name}' must be a positive integer.");
+
+    return parsed;
 }
 
 public partial class Program;

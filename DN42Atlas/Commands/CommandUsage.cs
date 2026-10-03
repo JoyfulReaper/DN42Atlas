@@ -10,6 +10,7 @@ public static class CommandUsage
         Console.WriteLine("  report <web-probe.json>          Generate an HTML report");
         Console.WriteLine("  probe-test                      Single-host HTTP/HTTPS probe test");
         Console.WriteLine("  run                             Resolve, scan, generate HTML, and publish stable files");
+        Console.WriteLine("  registry-update                 Safely refresh the configured local registry checkout");
         Console.WriteLine("  --help, -h, help                 Show this usage");
     }
 }
