@@ -3,6 +3,17 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/main/VisualStudio.gitignore
 
+# DN42Atlas generated files
+
+# Resolver output
+domain-resolution.json
+
+# Scan artifacts
+results/
+
+# Published static output
+published/
+
 # User-specific files
 *.rsuser
 *.suo
