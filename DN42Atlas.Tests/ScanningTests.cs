@@ -56,10 +56,11 @@ public sealed class ScanningTests
               {"Domain":"external.dn42","Status":"Resolved","Addresses":["192.0.2.1"]},
               {"Domain":"mixed.dn42","Status":"Resolved","Addresses":["fd42::1","192.0.2.1"]},
               {"Domain":"invalid.dn42","Status":"Resolved","Addresses":["invalid"]},
+              {"Domain":"not-dn42.example","Status":"Resolved","Addresses":["fd42::1"]},
               {"Domain":"empty.dn42","Status":"Resolved","Addresses":[]},
               {"Domain":"failed.dn42","Status":"NotFound"},
               {"Domain":"","Status":"Resolved"},
-              {"Domain":"z.dn42","Status":"Resolved","Addresses":["172.20.2.1"]},
+              {"Domain":"z.DN42","Status":"Resolved","Addresses":["172.20.2.1"]},
               {"Domain":"a.dn42","Status":"Resolved","Addresses":["fd42::1"]},
               {"Domain":"a.dn42","Status":"Resolved","Addresses":["fd42::1"]}
             ]
@@ -81,11 +82,12 @@ public sealed class ScanningTests
             Environment.CurrentDirectory = previousDirectory;
         }
         Assert.HasCount(46, calls);
-        Assert.IsTrue(calls.All(x => x is "a.dn42" or "z.dn42"));
+        Assert.IsTrue(calls.All(x => x is "a.dn42" or "z.DN42"));
+        Assert.IsFalse(calls.Contains("not-dn42.example"));
         var jsonPath = Directory.GetFiles(Path.Combine(files.DirectoryPath, "results"), "web-probe-*.json").Single();
         Assert.IsTrue(File.Exists(Path.ChangeExtension(jsonPath, ".html")));
         var json = await File.ReadAllTextAsync(jsonPath);
-        foreach (var excluded in new[] { "blocked.dn42", "private.dn42", "172.20.1.0/24", "prefix.dn42" })
+        foreach (var excluded in new[] { "blocked.dn42", "private.dn42", "172.20.1.0/24", "prefix.dn42", "not-dn42.example" })
             Assert.IsFalse(json.Contains(excluded, StringComparison.Ordinal));
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
@@ -98,7 +100,7 @@ public sealed class ScanningTests
         CollectionAssert.AreEqual(new[] { "external.dn42", "mixed.dn42", "invalid.dn42" }, root.GetProperty("SkippedExternalOrMixedDomains").EnumerateArray().Select(x => x.GetString()).ToArray());
         var results = root.GetProperty("Results").EnumerateArray().ToArray();
         var actual = results.Select(x => (x.GetProperty("Domain").GetString(), x.GetProperty("Scheme").GetString(), x.GetProperty("Port").GetInt32())).ToArray();
-        var expected = new[] { "a.dn42", "z.dn42" }.SelectMany(domain => HttpProbeTargets.All.Select(target => (domain, target.Scheme, target.Port))).OrderBy(x => x.domain).ThenBy(x => x.Scheme).ThenBy(x => x.Port).ToArray();
+        var expected = new[] { "a.dn42", "z.DN42" }.SelectMany(domain => HttpProbeTargets.All.Select(target => (domain, target.Scheme, target.Port))).OrderBy(x => x.domain).ThenBy(x => x.Scheme).ThenBy(x => x.Port).ToArray();
         CollectionAssert.AreEqual(expected, actual);
         Assert.AreEqual(JsonSerializer.SerializeToElement(new HttpProbeResult { Domain = "a.dn42", Scheme = "http", Port = 80, Reachable = true }).GetRawText(), JsonSerializer.Serialize(results[0]));
     }

@@ -54,7 +54,10 @@ public sealed class WebScanner
                     .GetString();
 
             if (string.IsNullOrWhiteSpace(
-                domain))
+                domain) ||
+                !domain.EndsWith(
+                    ".dn42",
+                    StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
