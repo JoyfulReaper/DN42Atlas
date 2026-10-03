@@ -2,8 +2,10 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
+
 using DN42Atlas.Probing;
 using DN42Atlas.Registry;
+using DN42Atlas.Reporting;
 
 var probeTargets = new[]
 {
@@ -34,23 +36,70 @@ var probeTargets = new[]
     ("https", 10443)
 };
 
+
+//
+// Generate an HTML Atlas viewer from an existing
+// web-probe JSON file.
+//
+if (args.Length > 0 &&
+    args[0] == "report")
+{
+    if (args.Length < 2)
+    {
+        Console.WriteLine(
+            "Usage: report <web-probe.json>");
+
+        return;
+    }
+
+    var inputPath =
+        args[1];
+
+    if (!File.Exists(inputPath))
+    {
+        Console.WriteLine(
+            $"File not found: {inputPath}");
+
+        return;
+    }
+
+    var htmlPath =
+        Path.ChangeExtension(
+            inputPath,
+            ".html");
+
+    await AtlasReportGenerator.GenerateAsync(
+        inputPath,
+        htmlPath);
+
+    Console.WriteLine(
+        $"Atlas viewer written to: {htmlPath}");
+
+    return;
+}
+
+
 //
 // Single-host probe test
 //
-if (args.Length > 0 && args[0] == "probe-test")
+if (args.Length > 0 &&
+    args[0] == "probe-test")
 {
-    var tasks = probeTargets.Select(target =>
-        HttpProber.ProbeAsync(
-            "burble.dn42",
-            target.Item1,
-            target.Item2));
+    var tasks =
+        probeTargets.Select(target =>
+            HttpProber.ProbeAsync(
+                "burble.dn42",
+                target.Item1,
+                target.Item2));
 
-    var results = await Task.WhenAll(tasks);
+    var results =
+        await Task.WhenAll(tasks);
 
     foreach (var result in results)
     {
         Console.WriteLine(
-            $"{result.Scheme}://{result.Domain}:{result.Port} " +
+            $"{result.Scheme}://" +
+            $"{result.Domain}:{result.Port} " +
             $"reachable={result.Reachable} " +
             $"robotsHttp={result.RobotsStatusCode} " +
             $"robots={result.Robots} " +
@@ -64,8 +113,10 @@ if (args.Length > 0 && args[0] == "probe-test")
                 $"    pageHttp={result.StatusCode} " +
                 $"title=\"{result.Title}\" " +
                 $"contentType={result.ContentType} " +
-                $"links={result.DiscoveredLinks.Count} " +
-                $"dn42Mentions={result.Dn42Mentions.Count} " +
+                $"links={result.DiscoveredLinks.Count}" +
+                $"{(result.LinksTruncated ? "+" : "")} " +
+                $"dn42Mentions={result.Dn42Mentions.Count}" +
+                $"{(result.Dn42MentionsTruncated ? "+" : "")} " +
                 $"pageRedirect={result.HomepageRedirectLocation}");
         }
     }
@@ -73,14 +124,18 @@ if (args.Length > 0 && args[0] == "probe-test")
     return;
 }
 
+
 //
-// HTTP/HTTPS scan using an existing DNS-resolution JSON file
+// HTTP/HTTPS scan using an existing
+// DNS-resolution JSON file.
 //
-if (args.Length > 0 && args[0] == "web-scan")
+if (args.Length > 0 &&
+    args[0] == "web-scan")
 {
-    var resolutionPath = args.Length > 1
-        ? args[1]
-        : "domain-resolution.json.bk2";
+    var resolutionPath =
+        args.Length > 1
+            ? args[1]
+            : "domain-resolution.json.bk2";
 
     if (!File.Exists(resolutionPath))
     {
@@ -95,23 +150,35 @@ if (args.Length > 0 && args[0] == "web-scan")
 
     using var resolutionDocument =
         JsonDocument.Parse(
-            await File.ReadAllTextAsync(resolutionPath));
+            await File.ReadAllTextAsync(
+                resolutionPath));
 
-    var domains = new List<string>();
-    var skippedExternal = new List<string>();
+    var domains =
+        new List<string>();
 
-    foreach (var item in resolutionDocument
-        .RootElement
-        .EnumerateArray())
+    var skippedExternal =
+        new List<string>();
+
+    foreach (var item in
+        resolutionDocument
+            .RootElement
+            .EnumerateArray())
     {
         var domain =
-            item.GetProperty("Domain").GetString();
+            item.GetProperty(
+                    "Domain")
+                .GetString();
 
         var status =
-            item.GetProperty("Status").GetString();
+            item.GetProperty(
+                    "Status")
+                .GetString();
 
-        if (string.IsNullOrWhiteSpace(domain))
+        if (string.IsNullOrWhiteSpace(
+            domain))
+        {
             continue;
+        }
 
         if (!domain.EndsWith(
             ".dn42",
@@ -123,36 +190,48 @@ if (args.Length > 0 && args[0] == "web-scan")
         if (status != "Resolved")
             continue;
 
-        var addresses = item
-            .GetProperty("Addresses")
-            .EnumerateArray()
-            .Select(x => x.GetString())
-            .Where(x => !string.IsNullOrWhiteSpace(x))
-            .Cast<string>()
-            .ToList();
+        var addresses =
+            item.GetProperty(
+                    "Addresses")
+                .EnumerateArray()
+                .Select(
+                    x => x.GetString())
+                .Where(
+                    x =>
+                        !string.IsNullOrWhiteSpace(
+                            x))
+                .Cast<string>()
+                .ToList();
 
         if (addresses.Count == 0)
             continue;
 
         //
         // Safety guard:
-        // don't let a .dn42 record point Atlas out onto
-        // arbitrary clearnet address space.
+        //
+        // Don't let a .dn42 record point Atlas
+        // onto arbitrary clearnet address space.
         //
         if (addresses.Any(
-            address => !IsDn42Address(address)))
+            address =>
+                !IsDn42Address(
+                    address)))
         {
-            skippedExternal.Add(domain);
+            skippedExternal.Add(
+                domain);
+
             continue;
         }
 
         domains.Add(domain);
     }
 
-    domains = domains
-        .Distinct(StringComparer.OrdinalIgnoreCase)
-        .OrderBy(x => x)
-        .ToList();
+    domains =
+        domains
+            .Distinct(
+                StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
 
     Console.WriteLine();
 
@@ -162,24 +241,34 @@ if (args.Length > 0 && args[0] == "web-scan")
     Console.WriteLine(
         $"Skipped external/mixed domains:  {skippedExternal.Count}");
 
-    var work = domains
-        .SelectMany(domain =>
-            probeTargets.Select(target => new
-            {
-                Domain = domain,
-                Scheme = target.Item1,
-                Port = target.Item2
-            }))
-        .ToList();
+    var work =
+        domains
+            .SelectMany(
+                domain =>
+                    probeTargets.Select(
+                        target => new
+                        {
+                            Domain =
+                                domain,
+
+                            Scheme =
+                                target.Item1,
+
+                            Port =
+                                target.Item2
+                        }))
+            .ToList();
 
     Console.WriteLine(
         $"Total HTTP probe targets:        {work.Count}");
 
     Console.WriteLine();
-    Console.WriteLine("Starting scan...");
+    Console.WriteLine(
+        "Starting scan...");
     Console.WriteLine();
 
-    var startedAt = DateTimeOffset.Now;
+    var startedAt =
+        DateTimeOffset.Now;
 
     var results =
         new ConcurrentBag<HttpProbeResult>();
@@ -193,7 +282,9 @@ if (args.Length > 0 && args[0] == "web-scan")
         {
             MaxDegreeOfParallelism = 32
         },
-        async (item, cancellationToken) =>
+        async (
+            item,
+            cancellationToken) =>
         {
             var result =
                 await HttpProber.ProbeAsync(
@@ -205,12 +296,14 @@ if (args.Length > 0 && args[0] == "web-scan")
             results.Add(result);
 
             var currentCompleted =
-                Interlocked.Increment(ref completed);
+                Interlocked.Increment(
+                    ref completed);
 
             if (result.Reachable)
             {
                 var currentReachable =
-                    Interlocked.Increment(ref reachable);
+                    Interlocked.Increment(
+                        ref reachable);
 
                 Console.WriteLine(
                     $"[+] {result.Scheme}://" +
@@ -226,8 +319,10 @@ if (args.Length > 0 && args[0] == "web-scan")
                         $"    pageHttp={result.StatusCode} " +
                         $"title=\"{result.Title}\" " +
                         $"contentType={result.ContentType} " +
-                        $"links={result.DiscoveredLinks.Count} " +
-                        $"dn42Mentions={result.Dn42Mentions.Count} " +
+                        $"links={result.DiscoveredLinks.Count}" +
+                        $"{(result.LinksTruncated ? "+" : "")} " +
+                        $"dn42Mentions={result.Dn42Mentions.Count}" +
+                        $"{(result.Dn42MentionsTruncated ? "+" : "")} " +
                         $"pageRedirect={result.HomepageRedirectLocation}");
                 }
 
@@ -235,32 +330,41 @@ if (args.Length > 0 && args[0] == "web-scan")
                     $"    reachable={currentReachable} " +
                     $"progress={currentCompleted}/{work.Count}");
             }
-            else if (currentCompleted % 100 == 0)
+            else if (
+                currentCompleted % 100 == 0)
             {
                 Console.WriteLine(
                     $"[...] progress " +
                     $"{currentCompleted}/{work.Count} " +
-                    $"reachable={Volatile.Read(ref reachable)}");
+                    $"reachable=" +
+                    $"{Volatile.Read(ref reachable)}");
             }
         });
 
-    var finishedAt = DateTimeOffset.Now;
+    var finishedAt =
+        DateTimeOffset.Now;
 
-    var orderedResults = results
-        .OrderBy(x => x.Domain)
-        .ThenBy(x => x.Scheme)
-        .ThenBy(x => x.Port)
-        .ToList();
+    var orderedResults =
+        results
+            .OrderBy(
+                x => x.Domain)
+            .ThenBy(
+                x => x.Scheme)
+            .ThenBy(
+                x => x.Port)
+            .ToList();
 
     var timestamp =
-        startedAt.ToString("yyyyMMdd-HHmmss");
+        startedAt.ToString(
+            "yyyyMMdd-HHmmss");
 
     var resultsDirectory =
         Path.Combine(
             Environment.CurrentDirectory,
             "results");
 
-    Directory.CreateDirectory(resultsDirectory);
+    Directory.CreateDirectory(
+        resultsDirectory);
 
     var webOutputPath =
         Path.Combine(
@@ -271,9 +375,14 @@ if (args.Length > 0 && args[0] == "web-scan")
         JsonSerializer.Serialize(
             new
             {
-                GeneratedAt = finishedAt,
-                StartedAt = startedAt,
-                FinishedAt = finishedAt,
+                GeneratedAt =
+                    finishedAt,
+
+                StartedAt =
+                    startedAt,
+
+                FinishedAt =
+                    finishedAt,
 
                 DurationSeconds =
                     (finishedAt - startedAt)
@@ -295,18 +404,23 @@ if (args.Length > 0 && args[0] == "web-scan")
                     reachable,
 
                 ProbeTargets =
-                    probeTargets.Select(x => new
-                    {
-                        Scheme = x.Item1,
-                        Port = x.Item2
-                    }),
+                    probeTargets.Select(
+                        x => new
+                        {
+                            Scheme =
+                                x.Item1,
+
+                            Port =
+                                x.Item2
+                        }),
 
                 //
-                // Serialize the real object directly.
-                // New probe fields now automatically
-                // appear in the JSON.
+                // Serialize the actual result objects
+                // directly so new probe properties
+                // automatically appear in JSON.
                 //
-                Results = orderedResults
+                Results =
+                    orderedResults
             },
             new JsonSerializerOptions
             {
@@ -317,10 +431,28 @@ if (args.Length > 0 && args[0] == "web-scan")
         webOutputPath,
         webJson);
 
+    //
+    // Automatically make a browseable
+    // self-contained HTML Atlas too.
+    //
+    var viewerOutputPath =
+        Path.ChangeExtension(
+            webOutputPath,
+            ".html");
+
+    await AtlasReportGenerator.GenerateAsync(
+        webOutputPath,
+        viewerOutputPath);
+
     Console.WriteLine();
-    Console.WriteLine("==============================");
-    Console.WriteLine("Scan complete.");
-    Console.WriteLine("==============================");
+    Console.WriteLine(
+        "==============================");
+
+    Console.WriteLine(
+        "Scan complete.");
+
+    Console.WriteLine(
+        "==============================");
 
     Console.WriteLine(
         $"Domains probed:    {domains.Count}");
@@ -338,8 +470,12 @@ if (args.Length > 0 && args[0] == "web-scan")
     Console.WriteLine(
         $"Results:           {webOutputPath}");
 
+    Console.WriteLine(
+        $"Viewer:            {viewerOutputPath}");
+
     return;
 }
+
 
 //
 // Normal registry + DNS-resolution scan
@@ -347,7 +483,8 @@ if (args.Length > 0 && args[0] == "web-scan")
 var registryPath =
     Path.Combine(
         Environment.GetFolderPath(
-            Environment.SpecialFolder.UserProfile),
+            Environment.SpecialFolder
+                .UserProfile),
         "dn42-registry",
         "data",
         "dns");
@@ -356,12 +493,14 @@ var registryDomains =
     new List<DomainObject>();
 
 foreach (var file in
-    Directory.EnumerateFiles(registryPath))
+    Directory.EnumerateFiles(
+        registryPath))
 {
     try
     {
         registryDomains.Add(
-            DomainParser.Parse(file));
+            DomainParser.Parse(
+                file));
     }
     catch (Exception ex)
     {
@@ -371,12 +510,14 @@ foreach (var file in
     }
 }
 
-registryDomains = registryDomains
-    .Where(x =>
-        x.Domain.EndsWith(
-            ".dn42",
-            StringComparison.OrdinalIgnoreCase))
-    .ToList();
+registryDomains =
+    registryDomains
+        .Where(
+            x =>
+                x.Domain.EndsWith(
+                    ".dn42",
+                    StringComparison.OrdinalIgnoreCase))
+        .ToList();
 
 Console.WriteLine(
     $"Registered domains: " +
@@ -388,7 +529,8 @@ var resolutions =
     new List<DomainResolution>();
 
 foreach (var domain in
-    registryDomains.OrderBy(x => x.Domain))
+    registryDomains.OrderBy(
+        x => x.Domain))
 {
     try
     {
@@ -411,7 +553,8 @@ foreach (var domain in
                     addresses.ToList()
             };
 
-        resolutions.Add(result);
+        resolutions.Add(
+            result);
 
         if (result.Status ==
             ResolutionStatus.Resolved)
@@ -419,7 +562,8 @@ foreach (var domain in
             Console.WriteLine(
                 $"[+] {domain.Domain}");
 
-            foreach (var address in addresses)
+            foreach (
+                var address in addresses)
             {
                 Console.WriteLine(
                     $"    {address}");
@@ -449,24 +593,34 @@ foreach (var domain in
         resolutions.Add(
             new DomainResolution
             {
-                Domain = domain.Domain,
-                Status = status,
+                Domain =
+                    domain.Domain,
+
+                Status =
+                    status,
+
                 Error =
-                    ex.SocketErrorCode.ToString()
+                    ex.SocketErrorCode
+                        .ToString()
             });
 
         Console.WriteLine(
-            $"[-] {domain.Domain} ({status})");
+            $"[-] {domain.Domain} " +
+            $"({status})");
     }
     catch (Exception ex)
     {
         resolutions.Add(
             new DomainResolution
             {
-                Domain = domain.Domain,
+                Domain =
+                    domain.Domain,
+
                 Status =
                     ResolutionStatus.Error,
-                Error = ex.Message
+
+                Error =
+                    ex.Message
             });
 
         Console.WriteLine(
@@ -506,17 +660,20 @@ Console.WriteLine(
     $"{registryDomains.Count}");
 
 Console.WriteLine(
-    $"Resolved:          {resolved}");
+    $"Resolved:          " +
+    $"{resolved}");
 
 Console.WriteLine(
-    $"Not found:         {notFound}");
+    $"Not found:         " +
+    $"{notFound}");
 
 Console.WriteLine(
     $"Temporary failure: " +
     $"{temporaryFailures}");
 
 Console.WriteLine(
-    $"Errors:            {errors}");
+    $"Errors:            " +
+    $"{errors}");
 
 var resolutionOutputPath =
     Path.Combine(
@@ -525,19 +682,20 @@ var resolutionOutputPath =
 
 var resolutionJson =
     JsonSerializer.Serialize(
-        resolutions.Select(x => new
-        {
-            x.Domain,
+        resolutions.Select(
+            x => new
+            {
+                x.Domain,
 
-            Status =
-                x.Status.ToString(),
+                Status =
+                    x.Status.ToString(),
 
-            Addresses =
-                x.Addresses.Select(
-                    a => a.ToString()),
+                Addresses =
+                    x.Addresses.Select(
+                        a => a.ToString()),
 
-            x.Error
-        }),
+                x.Error
+            }),
         new JsonSerializerOptions
         {
             WriteIndented = true
@@ -557,7 +715,8 @@ Console.WriteLine(
 //
 // DN42 address-space guard
 //
-static bool IsDn42Address(string value)
+static bool IsDn42Address(
+    string value)
 {
     if (!IPAddress.TryParse(
         value,

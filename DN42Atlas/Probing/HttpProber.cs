@@ -7,8 +7,14 @@ namespace DN42Atlas.Probing;
 
 public static class HttpProber
 {
+    private const string UserAgent =
+        "DN42Atlas/0.1 (+https://joyfulreaper.dn42/)";
+
     private const int MaxRobotsBytes = 64 * 1024;
     private const int MaxHomepageBytes = 256 * 1024;
+
+    private const int MaxDiscoveredLinks = 250;
+    private const int MaxDn42Mentions = 250;
 
     private static readonly Regex TitleRegex = new(
         @"<title\b[^>]*>(?<title>.*?)</title>",
@@ -44,10 +50,6 @@ public static class HttpProber
 
             SslOptions =
             {
-                //
-                // Discovery should still see services using
-                // self-signed / weird DN42 certificates.
-                //
                 RemoteCertificateValidationCallback =
                     (_, _, _, _) => true
             }
@@ -66,12 +68,11 @@ public static class HttpProber
             ? domain
             : $"{domain}:{port}";
 
-        var origin = new Uri(
-            $"{scheme}://{authority}/");
+        var origin =
+            new Uri($"{scheme}://{authority}/");
 
-        var robotsUri = new Uri(
-            origin,
-            "robots.txt");
+        var robotsUri =
+            new Uri(origin, "robots.txt");
 
         RobotsStatus robotsStatus;
         int? robotsStatusCode;
@@ -79,10 +80,7 @@ public static class HttpProber
         string? robotsRedirect;
 
         //
-        // First: robots.txt.
-        //
-        // If we cannot determine permission, we do NOT
-        // fetch the homepage.
+        // robots.txt first.
         //
         try
         {
@@ -91,8 +89,7 @@ public static class HttpProber
                     HttpMethod.Get,
                     robotsUri);
 
-            request.Headers.UserAgent.ParseAdd(
-                "DN42Atlas/0.1");
+            AddAtlasHeaders(request);
 
             using var response =
                 await client.SendAsync(
@@ -136,11 +133,6 @@ public static class HttpProber
             }
             else
             {
-                //
-                // Includes redirects.
-                //
-                // We deliberately don't follow them yet.
-                //
                 robotsStatus =
                     RobotsStatus.Unavailable;
 
@@ -167,10 +159,8 @@ public static class HttpProber
         }
 
         //
-        // We successfully talked HTTP to this origin.
-        //
-        // But if robots did not explicitly permit /,
-        // discovery stops here.
+        // We talked HTTP successfully, but don't fetch /
+        // unless robots explicitly permits it.
         //
         if (robotsAllowed != true)
         {
@@ -183,21 +173,22 @@ public static class HttpProber
                 Reachable = true,
 
                 Robots = robotsStatus,
+
                 RobotsStatusCode =
                     robotsStatusCode,
+
                 RobotsAllowed =
                     robotsAllowed,
+
                 RedirectLocation =
                     robotsRedirect
             };
         }
 
         //
-        // robots.txt permits /.
+        // Fetch exactly one page: /
         //
-        // Fetch exactly one page: the origin root.
-        //
-        // Redirects are NOT followed.
+        // Redirects are recorded, never followed.
         //
         try
         {
@@ -206,8 +197,7 @@ public static class HttpProber
                     HttpMethod.Get,
                     origin);
 
-            request.Headers.UserAgent.ParseAdd(
-                "DN42Atlas/0.1");
+            AddAtlasHeaders(request);
 
             using var response =
                 await client.SendAsync(
@@ -228,21 +218,20 @@ public static class HttpProber
                     .Location?
                     .ToString();
 
-            var title =
-                default(string);
+            string? title = null;
 
             var discoveredLinks =
                 new List<string>();
 
+            var linksTruncated = false;
+
             var dn42Mentions =
                 new List<string>();
 
-            var truncated = false;
+            var dn42MentionsTruncated = false;
 
-            //
-            // Don't bother parsing error pages or redirect
-            // bodies as site content.
-            //
+            var contentTruncated = false;
+
             if (response.IsSuccessStatusCode &&
                 IsTextLike(contentType))
             {
@@ -252,20 +241,32 @@ public static class HttpProber
                         MaxHomepageBytes,
                         cancellationToken);
 
-                truncated =
+                contentTruncated =
                     body.Truncated;
 
                 title =
                     ExtractTitle(body.Text);
 
-                discoveredLinks =
+                var links =
                     ExtractLinks(
                         body.Text,
                         origin);
 
-                dn42Mentions =
+                discoveredLinks =
+                    links.Items;
+
+                linksTruncated =
+                    links.Truncated;
+
+                var mentions =
                     ExtractDn42Mentions(
                         body.Text);
+
+                dn42Mentions =
+                    mentions.Items;
+
+                dn42MentionsTruncated =
+                    mentions.Truncated;
             }
 
             return new HttpProbeResult
@@ -289,7 +290,7 @@ public static class HttpProber
                     homepageRedirect,
 
                 ContentTruncated =
-                    truncated,
+                    contentTruncated,
 
                 Robots =
                     robotsStatus,
@@ -306,20 +307,20 @@ public static class HttpProber
                 DiscoveredLinks =
                     discoveredLinks,
 
+                LinksTruncated =
+                    linksTruncated,
+
                 Dn42Mentions =
-                    dn42Mentions
+                    dn42Mentions,
+
+                Dn42MentionsTruncated =
+                    dn42MentionsTruncated
             };
         }
         catch (Exception ex) when (
             ex is HttpRequestException or
             TaskCanceledException)
         {
-            //
-            // robots.txt already proved the origin exists.
-            //
-            // A homepage failure does NOT make the service
-            // disappear from Atlas.
-            //
             return new HttpProbeResult
             {
                 Domain = domain,
@@ -346,13 +347,21 @@ public static class HttpProber
         }
     }
 
+    private static void AddAtlasHeaders(
+        HttpRequestMessage request)
+    {
+        //
+        // TryAddWithoutValidation avoids ProductInfoHeaderValue
+        // getting picky about our contact URL.
+        //
+        request.Headers.TryAddWithoutValidation(
+            "User-Agent",
+            UserAgent);
+    }
+
     private static bool IsTextLike(
         string? contentType)
     {
-        //
-        // Plenty of homemade services have no useful
-        // Content-Type header, so absence is not fatal.
-        //
         if (string.IsNullOrWhiteSpace(contentType))
             return true;
 
@@ -403,21 +412,16 @@ public static class HttpProber
         return title;
     }
 
-    private static List<string> ExtractLinks(
-        string text,
-        Uri sourceUri)
+    private static (
+        List<string> Items,
+        bool Truncated) ExtractLinks(
+            string text,
+            Uri sourceUri)
     {
         var links =
             new HashSet<string>(
                 StringComparer.OrdinalIgnoreCase);
 
-        //
-        // HTML href attributes:
-        //
-        // <a href>
-        // <link href>
-        // etc.
-        //
         foreach (
             Match match in
             HrefRegex.Matches(text))
@@ -428,9 +432,6 @@ public static class HttpProber
                 match.Groups["url"].Value);
         }
 
-        //
-        // Also find literal protocol URLs in page text.
-        //
         foreach (
             Match match in
             PlainUrlRegex.Matches(text))
@@ -441,10 +442,18 @@ public static class HttpProber
                 match.Groups["url"].Value);
         }
 
-        return links
-            .OrderBy(x => x)
-            .Take(250)
-            .ToList();
+        var ordered =
+            links
+                .OrderBy(x => x)
+                .ToList();
+
+        return (
+            ordered
+                .Take(MaxDiscoveredLinks)
+                .ToList(),
+
+            ordered.Count >
+                MaxDiscoveredLinks);
     }
 
     private static void AddLink(
@@ -459,31 +468,23 @@ public static class HttpProber
         if (string.IsNullOrWhiteSpace(value))
             return;
 
+        if (value.StartsWith("#"))
+            return;
+
         if (value.StartsWith(
-                "#",
-                StringComparison.Ordinal))
+            "javascript:",
+            StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
 
         if (value.StartsWith(
-                "javascript:",
-                StringComparison.OrdinalIgnoreCase))
+            "mailto:",
+            StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
 
-        if (value.StartsWith(
-                "mailto:",
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        //
-        // Plain-text URL regexes often grab punctuation
-        // immediately following the URL.
-        //
         value =
             value.TrimEnd(
                 '.',
@@ -493,9 +494,9 @@ public static class HttpProber
                 ']');
 
         if (!Uri.TryCreate(
-                sourceUri,
-                value,
-                out var uri))
+            sourceUri,
+            value,
+            out var uri))
         {
             return;
         }
@@ -503,9 +504,6 @@ public static class HttpProber
         if (!IsInterestingScheme(uri.Scheme))
             return;
 
-        //
-        // Fragments are not separate resources for Atlas.
-        //
         try
         {
             var builder =
@@ -518,8 +516,8 @@ public static class HttpProber
         }
         catch
         {
-            // Some odd-but-valid URI schemes may not
-            // cooperate with UriBuilder. Keep original.
+            // Some non-HTTP URIs may not cooperate
+            // with UriBuilder. Keep the original.
         }
 
         links.Add(uri.ToString());
@@ -546,18 +544,30 @@ public static class HttpProber
                 StringComparison.OrdinalIgnoreCase);
     }
 
-    private static List<string> ExtractDn42Mentions(
-        string text)
+    private static (
+        List<string> Items,
+        bool Truncated) ExtractDn42Mentions(
+            string text)
     {
-        return Dn42NameRegex
-            .Matches(text)
-            .Select(
-                x => x.Value.ToLowerInvariant())
-            .Distinct(
-                StringComparer.OrdinalIgnoreCase)
-            .OrderBy(x => x)
-            .Take(250)
-            .ToList();
+        var mentions =
+            Dn42NameRegex
+                .Matches(text)
+                .Select(
+                    x =>
+                        x.Value
+                            .ToLowerInvariant())
+                .Distinct(
+                    StringComparer.OrdinalIgnoreCase)
+                .OrderBy(x => x)
+                .ToList();
+
+        return (
+            mentions
+                .Take(MaxDn42Mentions)
+                .ToList(),
+
+            mentions.Count >
+                MaxDn42Mentions);
     }
 
     private static async Task<(
@@ -623,16 +633,6 @@ public static class HttpProber
             truncated);
     }
 
-    //
-    // Small robots.txt parser focused on answering one
-    // question safely:
-    //
-    //     May DN42Atlas request "/"?
-    //
-    // Specific DN42Atlas groups beat "*" groups.
-    // Longest matching rule wins.
-    // Allow wins a tie.
-    //
     private static bool IsPathAllowed(
         string robotsText,
         string userAgent,
@@ -648,8 +648,7 @@ public static class HttpProber
                     g => g.Agents.Any(
                         a => a.Equals(
                             userAgent,
-                            StringComparison
-                                .OrdinalIgnoreCase)))
+                            StringComparison.OrdinalIgnoreCase)))
                 .ToList();
 
         if (applicable.Count == 0)
@@ -707,11 +706,9 @@ public static class HttpProber
         var groups =
             new List<RobotsGroup>();
 
-        RobotsGroup? current =
-            null;
+        RobotsGroup? current = null;
 
-        var sawRule =
-            false;
+        var sawRule = false;
 
         foreach (
             var rawLine in
@@ -778,9 +775,6 @@ public static class HttpProber
                 "Disallow",
                 StringComparison.OrdinalIgnoreCase))
             {
-                //
-                // Empty Disallow means no restriction.
-                //
                 if (!string.IsNullOrEmpty(value))
                 {
                     current.Rules.Add(
@@ -801,8 +795,7 @@ public static class HttpProber
         string path)
     {
         var endAnchored =
-            pattern.EndsWith(
-                '$');
+            pattern.EndsWith('$');
 
         if (endAnchored)
             pattern = pattern[..^1];

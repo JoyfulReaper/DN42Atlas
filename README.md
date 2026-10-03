@@ -1,2 +1,382 @@
 # DN42Atlas
-DN42Atlas
+
+DN42Atlas is a small .NET 10 tool for discovering and browsing publicly reachable services on the [DN42](https://dn42.dev/) network.
+
+It starts with registered `.dn42` domains, resolves them through a DN42-aware DNS resolver, probes a curated set of HTTP/HTTPS ports, respects `robots.txt`, and records basic metadata such as page titles, redirects, links, and referenced `.dn42` hostnames.
+
+It can also turn a scan result into a self-contained HTML viewer for casually flipping through public DN42 services.
+
+This is primarily a hobby project for exploring DN42 and learning more about routing, service discovery, and the weird little corners of private networks.
+
+## What It Does
+
+DN42Atlas currently has three main stages:
+
+1. Parse DN42 registry DNS objects.
+2. Resolve registered `.dn42` names.
+3. Probe reachable web services and optionally inspect their homepage.
+
+For web services, Atlas records information such as:
+
+- hostname
+- scheme and port
+- whether the origin responded
+- `robots.txt` status
+- homepage HTTP status
+- page title
+- content type
+- redirects
+- discovered links
+- `.dn42` hostname mentions
+- truncation status for large pages/link sets
+
+Scan results are stored as JSON.
+
+DN42Atlas can then ingest that JSON and generate a self-contained HTML browser for the results.
+
+## Polite Discovery
+
+DN42Atlas is intended to be a relatively conservative discovery tool, not a vulnerability scanner.
+
+For each potential HTTP/HTTPS origin it:
+
+1. Requests `/robots.txt`.
+2. Does not automatically follow redirects.
+3. Fetches `/` only when robots rules explicitly permit it or no robots file exists.
+4. Does not recursively crawl discovered links.
+5. Does not attempt authentication.
+6. Does not brute-force paths.
+7. Does not perform vulnerability checks.
+8. Uses bounded concurrency and short timeouts.
+9. Limits the amount of homepage content it reads.
+
+The current scanner identifies itself as:
+
+```text
+DN42Atlas/0.1 (+https://joyfulreaper.dn42/)
+```
+
+If `robots.txt` cannot be evaluated safely, Atlas does not fetch the homepage.
+
+Discovered links are recorded for later analysis but are not automatically followed.
+
+## DN42 Address Guard
+
+Before probing a resolved `.dn42` hostname, Atlas verifies that its addresses fall within expected DN42 address space.
+
+Currently accepted ranges include:
+
+```text
+172.20.0.0/14
+172.31.0.0/16
+10.100.0.0/14
+10.127.0.0/16
+fd00::/8
+```
+
+Domains resolving outside these ranges are skipped rather than allowing DNS records to direct the scanner onto arbitrary clearnet hosts.
+
+## Requirements
+
+- .NET 10 SDK
+- access to DN42
+- a DNS resolver capable of resolving `.dn42`
+- a local checkout of the DN42 registry
+
+The registry is currently expected at:
+
+```text
+~/dn42-registry
+```
+
+Specifically:
+
+```text
+~/dn42-registry/data/dns
+```
+
+## Build
+
+From the repository root:
+
+```bash
+dotnet build DN42Atlas/DN42Atlas.csproj
+```
+
+## Commands
+
+### Registry / DNS Scan
+
+Running without arguments parses the registry and resolves registered `.dn42` domains:
+
+```bash
+dotnet run --project DN42Atlas
+```
+
+The result is written to:
+
+```text
+domain-resolution.json
+```
+
+### Single-Host Probe Test
+
+For development, Atlas can probe `burble.dn42` across the configured port list:
+
+```bash
+dotnet run --project DN42Atlas -- probe-test
+```
+
+This is useful for checking HTTP probing, TLS handling, robots parsing, homepage metadata extraction, and link discovery before running a full scan.
+
+### Web Scan
+
+Use an existing DNS-resolution file:
+
+```bash
+dotnet run --project DN42Atlas -- web-scan
+```
+
+The default source file is:
+
+```text
+domain-resolution.json.bk2
+```
+
+A different file can be supplied:
+
+```bash
+dotnet run --project DN42Atlas -- web-scan path/to/domain-resolution.json
+```
+
+Results are written under:
+
+```text
+results/
+```
+
+For example:
+
+```text
+results/web-probe-20261003-002948.json
+```
+
+The scan also generates a corresponding HTML viewer:
+
+```text
+results/web-probe-20261003-002948.html
+```
+
+To preserve console output as well:
+
+```bash
+mkdir -p results
+
+dotnet run --project DN42Atlas -- web-scan \
+  2>&1 | tee "results/web-scan-console-$(date +%Y%m%d-%H%M%S).log"
+```
+
+## Generate a Viewer From an Existing Scan
+
+You do not need to rescan the network to generate the HTML viewer.
+
+```bash
+dotnet run --project DN42Atlas -- \
+  report results/web-probe-20261003-002948.json
+```
+
+This creates:
+
+```text
+results/web-probe-20261003-002948.html
+```
+
+On a Linux desktop:
+
+```bash
+xdg-open results/web-probe-20261003-002948.html
+```
+
+## HTML Atlas Viewer
+
+The generated report is a self-contained HTML file.
+
+It supports:
+
+- Previous / Next navigation
+- random origin selection
+- hostname/title filtering
+- direct links to discovered services
+- HTTP status and content type
+- robots status
+- page title
+- discovered links
+- `.dn42` hostname mentions
+- a list of discovered DN42 hosts outside the original seed set
+
+Keyboard shortcuts:
+
+```text
+Left Arrow   Previous origin
+Right Arrow  Next origin
+R            Random origin
+```
+
+No framework or build system is required for the report.
+
+It is intentionally just HTML, CSS, and a little JavaScript.
+
+## Currently Probed Web Ports
+
+The current curated list includes:
+
+```text
+HTTP:
+80
+81
+3000
+3001
+4000
+5000
+5001
+7000
+8000
+8001
+8008
+8080
+8081
+8088
+8880
+8888
+9000
+9090
+
+HTTPS:
+443
+4443
+8443
+9443
+10443
+```
+
+The goal is not to sweep every TCP port.
+
+The list is intentionally biased toward ports commonly used for web applications and self-hosted services.
+
+## Link Discovery
+
+When homepage access is permitted, Atlas currently extracts:
+
+- HTML `href` links
+- plain HTTP URLs
+- HTTPS URLs
+- Gopher URLs
+- Gemini URLs
+- `.dn42` hostname mentions
+
+Relative links are resolved against the source origin.
+
+Fragments are removed.
+
+`mailto:` and `javascript:` links are ignored.
+
+The current limits are:
+
+```text
+Homepage body:       256 KiB
+robots.txt body:      64 KiB
+Discovered links:       250
+DN42 mentions:           250
+```
+
+The JSON records when these limits caused truncation.
+
+## Current Scope
+
+DN42Atlas is currently focused on HTTP/HTTPS discovery.
+
+Planned or possible future work includes:
+
+- deduplicated discovered-host graph
+- showing which pages referenced each discovered host
+- optional second-layer discovery
+- better service classification
+- Gopher probing
+- Gemini probing
+- Finger probing
+- QOTD probing
+- scan profiles such as `core`, `extended`, and `all`
+- comparing scan history over time
+- hosted Atlas UI
+- richer topology and relationship visualization
+
+Any future recursive discovery should continue to use conservative limits and respect the policy of the destination service.
+
+## Example Findings
+
+A scan can uncover the usual mixture of DN42 infrastructure, personal pages, experiments, dashboards, and self-hosted software.
+
+Examples observed during development included services identifying themselves as:
+
+- Forgejo
+- Gitea
+- SearXNG
+- CyberChef
+- Portainer
+- Vaultwarden
+- qBittorrent WebUI
+- BlueMap
+- Kasm
+- looking glasses
+- network dashboards
+- blogs
+- personal homepages
+- authentication services
+- DN42-specific discovery sites
+
+These names are based only on publicly returned page metadata.
+
+DN42Atlas does not attempt to log in or inspect private application state.
+
+## Why?
+
+Mostly because DN42 is full of interesting things and manually finding them is annoying.
+
+The registry gives you names and network resources, but it does not necessarily tell you what people are actually running on them.
+
+DN42Atlas tries to bridge that gap without turning into a hostile scanner.
+
+The end goal is something closer to:
+
+```text
+"What public stuff exists on DN42 right now?"
+```
+
+than:
+
+```text
+"How many ways can I annoy every router operator?"
+```
+
+## Status
+
+Very experimental.
+
+Expect:
+
+- changing JSON formats
+- false positives
+- disappearing services
+- temporary DNS failures
+- strange certificates
+- unusual HTTP implementations
+- servers that respond differently between scans
+- code written primarily because it seemed fun at the time
+
+That is also approximately the expected operating environment of DN42.
+
+## License
+
+DN42Atlas is licensed under the GNU Affero General Public License v3.0.
+
+See [`LICENSE`](LICENSE) for details.

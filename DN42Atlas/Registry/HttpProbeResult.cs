@@ -19,7 +19,7 @@ public sealed class HttpProbeResult
     public bool Reachable { get; init; }
 
     //
-    // Homepage result
+    // Homepage
     //
     public int? StatusCode { get; init; }
 
@@ -34,7 +34,7 @@ public sealed class HttpProbeResult
     public bool ContentTruncated { get; init; }
 
     //
-    // robots.txt result
+    // robots.txt
     //
     public RobotsStatus Robots { get; init; } =
         RobotsStatus.NotChecked;
@@ -43,18 +43,19 @@ public sealed class HttpProbeResult
 
     public bool? RobotsAllowed { get; init; }
 
-    //
-    // This remains the robots.txt redirect location.
-    //
     public string? RedirectLocation { get; init; }
 
     //
     // Discovery only.
-    // DN42Atlas does NOT follow these.
+    // Atlas does not automatically follow these.
     //
     public List<string> DiscoveredLinks { get; init; } = [];
 
+    public bool LinksTruncated { get; init; }
+
     public List<string> Dn42Mentions { get; init; } = [];
+
+    public bool Dn42MentionsTruncated { get; init; }
 
     public string? Error { get; init; }
 }
