@@ -183,6 +183,8 @@ DN42Atlas/
     HttpProbeResult.cs
   Reporting/
     AtlasReportGenerator.cs
+  Publishing/
+    ArtifactPublisher.cs
 DN42Atlas.Tests/
 config/
   excluded-hosts.txt
@@ -218,7 +220,7 @@ dn42atlas resolve                      Explicit registry/DNS resolution
 dn42atlas web-scan [resolution-file]    HTTP/HTTPS scan from saved DNS results
 dn42atlas probe-test                    Single-host HTTP/HTTPS probe test
 dn42atlas report <web-probe.json>        HTML viewer from existing scan JSON
-dn42atlas run                           Resolve, scan fresh results, generate HTML
+dn42atlas run                           Resolve, scan, generate HTML, publish stable files
 dn42atlas --help | -h | help             Show usage without scanning
 ```
 
@@ -232,9 +234,19 @@ Unknown commands print usage and exit with code 2. Missing report arguments also
 dotnet run --project DN42Atlas -- run
 ```
 
-`run` resolves the registry into `domain-resolution.json`, passes that exact file to `web-scan`, and generates the corresponding HTML viewer through the existing web-scan report stage. It stops if a stage fails. It does not use the standalone web-scan default backup file, schedule future scans, or publish output.
+`run` resolves the registry into `domain-resolution.json`, passes that exact file to `web-scan`, and generates the corresponding HTML viewer through the existing web-scan report stage. It retains the timestamped JSON and HTML in `results/`, then copies the completed artifacts into stable output paths:
 
-For unattended execution, set the working directory explicitly: exclusion files, relative input paths, `domain-resolution.json`, and `results/` depend on it. The registry is read from `~/dn42-registry/data/dns` for the account running Atlas. Commands currently have no pipeline-wide cancellation support. Resolution output overwrites its fixed filename; scan filenames use local start time to the second, so concurrent runs can collide. Output writes are not atomic publication. These limitations remain for future pipeline work.
+```text
+published/
+  index.html
+  latest.json
+```
+
+Both files are staged in `published/`, flushed and closed, then individually replaced by same-directory atomic renames. Generation or staging failures leave the previous published files intact. The two replacements are not a single transaction: a crash or replacement failure between them can leave JSON and HTML from different runs. The HTML viewer is self-contained and does not load `latest.json`.
+
+The command stops and returns nonzero if a stage fails. Standalone `web-scan` and `report` keep their existing outputs and do not update `published/`. No web-server configuration, deployment, or scheduling is performed; a server may be configured separately to serve this directory. Temporary staging filenames begin with a dot and end in `.tmp`; servers should not expose these files.
+
+For unattended execution, set the working directory explicitly: exclusion files, relative input paths, `domain-resolution.json`, `results/`, and `published/` depend on it. The registry is read from `~/dn42-registry/data/dns` for the account running Atlas. Commands currently have no pipeline-wide cancellation support. Resolution output overwrites its fixed filename; scan filenames use local start time to the second, so concurrent runs can collide. Run one pipeline at a time. Historical artifact writes are unchanged; only the stable published files use atomic replacement.
 
 ### Registry / DNS Scan
 

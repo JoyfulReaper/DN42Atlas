@@ -134,6 +134,10 @@ public sealed class CommandTests
         Assert.AreEqual(Path.Combine(files.DirectoryPath, "domain-resolution.json"),
             document.RootElement.GetProperty("ResolutionSource").GetString());
         Assert.IsTrue(File.Exists(Path.ChangeExtension(json, ".html")));
+        var published = Path.Combine(files.DirectoryPath, "published");
+        Assert.AreEqual(await File.ReadAllTextAsync(json), await File.ReadAllTextAsync(Path.Combine(published, "latest.json")));
+        Assert.AreEqual(await File.ReadAllTextAsync(Path.ChangeExtension(json, ".html")),
+            await File.ReadAllTextAsync(Path.Combine(published, "index.html")));
     }
 
     [TestMethod]
@@ -154,6 +158,35 @@ public sealed class CommandTests
             Assert.IsFalse(Directory.Exists(Path.Combine(files.DirectoryPath, "results")));
         }
         finally { Environment.CurrentDirectory = previousDirectory; }
+    }
+
+    [TestMethod]
+    public async Task RunLeavesPreviousPublicationIntactWhenScanGenerationFails()
+    {
+        using var files = new TestFiles();
+        var registry = Path.Combine(files.DirectoryPath, "dns");
+        Directory.CreateDirectory(registry);
+        File.WriteAllText(Path.Combine(registry, "good"), "domain: good.dn42\n");
+        var published = Path.Combine(files.DirectoryPath, "published");
+        Directory.CreateDirectory(published);
+        File.WriteAllText(Path.Combine(published, "index.html"), "previous HTML");
+        File.WriteAllText(Path.Combine(published, "latest.json"), "previous JSON");
+        var policy = files.LoadPolicy();
+        var resolver = new RegistryResolver(policy, _ => Task.FromResult(new[] { IPAddress.Parse("fd42::1") }));
+        (string, int)[] targets = [("http", 80)];
+        var scanner = new WebScanner(policy, targets, (_, _, _, _) =>
+            Task.FromException<HttpProbeResult>(new InvalidDataException("Simulated generation failure.")));
+        var previousDirectory = Environment.CurrentDirectory;
+        try
+        {
+            Environment.CurrentDirectory = files.DirectoryPath;
+            var run = new RunCommand(new ResolveCommand(resolver, registry), new WebScanCommand(scanner, targets, policy));
+            await Assert.ThrowsAsync<InvalidDataException>(() => run.ExecuteAsync());
+        }
+        finally { Environment.CurrentDirectory = previousDirectory; }
+        Assert.AreEqual("previous HTML", await File.ReadAllTextAsync(Path.Combine(published, "index.html")));
+        Assert.AreEqual("previous JSON", await File.ReadAllTextAsync(Path.Combine(published, "latest.json")));
+        Assert.HasCount(2, Directory.GetFiles(published));
     }
 
     private static async Task<(int ExitCode, string Output, string Error)> RunCliAsync(string directory, string arguments)
