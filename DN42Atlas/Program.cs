@@ -57,6 +57,17 @@ if (args.Length > 0 && args[0] == "probe-test")
             $"redirect={result.RedirectLocation} " +
             $"allowed={result.RobotsAllowed} " +
             $"error={result.Error}");
+
+        if (result.StatusCode != null)
+        {
+            Console.WriteLine(
+                $"    pageHttp={result.StatusCode} " +
+                $"title=\"{result.Title}\" " +
+                $"contentType={result.ContentType} " +
+                $"links={result.DiscoveredLinks.Count} " +
+                $"dn42Mentions={result.Dn42Mentions.Count} " +
+                $"pageRedirect={result.HomepageRedirectLocation}");
+        }
     }
 
     return;
@@ -144,6 +155,7 @@ if (args.Length > 0 && args[0] == "web-scan")
         .ToList();
 
     Console.WriteLine();
+
     Console.WriteLine(
         $"Resolved DN42 domains to probe: {domains.Count}");
 
@@ -208,6 +220,17 @@ if (args.Length > 0 && args[0] == "web-scan")
                     $"allowed={result.RobotsAllowed} " +
                     $"redirect={result.RedirectLocation}");
 
+                if (result.StatusCode != null)
+                {
+                    Console.WriteLine(
+                        $"    pageHttp={result.StatusCode} " +
+                        $"title=\"{result.Title}\" " +
+                        $"contentType={result.ContentType} " +
+                        $"links={result.DiscoveredLinks.Count} " +
+                        $"dn42Mentions={result.Dn42Mentions.Count} " +
+                        $"pageRedirect={result.HomepageRedirectLocation}");
+                }
+
                 Console.WriteLine(
                     $"    reachable={currentReachable} " +
                     $"progress={currentCompleted}/{work.Count}");
@@ -244,62 +267,51 @@ if (args.Length > 0 && args[0] == "web-scan")
             resultsDirectory,
             $"web-probe-{timestamp}.json");
 
-    var webJson = JsonSerializer.Serialize(
-        new
-        {
-            GeneratedAt = finishedAt,
-            StartedAt = startedAt,
-            FinishedAt = finishedAt,
-            DurationSeconds =
-                (finishedAt - startedAt).TotalSeconds,
+    var webJson =
+        JsonSerializer.Serialize(
+            new
+            {
+                GeneratedAt = finishedAt,
+                StartedAt = startedAt,
+                FinishedAt = finishedAt,
 
-            ResolutionSource = resolutionPath,
+                DurationSeconds =
+                    (finishedAt - startedAt)
+                    .TotalSeconds,
 
-            ResolvedDomainsProbed =
-                domains.Count,
+                ResolutionSource =
+                    resolutionPath,
 
-            SkippedExternalOrMixedDomains =
-                skippedExternal,
+                ResolvedDomainsProbed =
+                    domains.Count,
 
-            ProbeTargetCount =
-                work.Count,
+                SkippedExternalOrMixedDomains =
+                    skippedExternal,
 
-            ReachableOrigins =
-                reachable,
+                ProbeTargetCount =
+                    work.Count,
 
-            ProbeTargets =
-                probeTargets.Select(x => new
-                {
-                    Scheme = x.Item1,
-                    Port = x.Item2
-                }),
+                ReachableOrigins =
+                    reachable,
 
-            Results =
-                orderedResults.Select(x => new
-                {
-                    x.Domain,
-                    x.Scheme,
-                    x.Port,
-                    x.Reachable,
+                ProbeTargets =
+                    probeTargets.Select(x => new
+                    {
+                        Scheme = x.Item1,
+                        Port = x.Item2
+                    }),
 
-                    x.StatusCode,
-
-                    x.RobotsStatusCode,
-
-                    Robots =
-                        x.Robots.ToString(),
-
-                    x.RobotsAllowed,
-
-                    x.RedirectLocation,
-
-                    x.Error
-                })
-        },
-        new JsonSerializerOptions
-        {
-            WriteIndented = true
-        });
+                //
+                // Serialize the real object directly.
+                // New probe fields now automatically
+                // appear in the JSON.
+                //
+                Results = orderedResults
+            },
+            new JsonSerializerOptions
+            {
+                WriteIndented = true
+            });
 
     await File.WriteAllTextAsync(
         webOutputPath,
@@ -332,12 +344,13 @@ if (args.Length > 0 && args[0] == "web-scan")
 //
 // Normal registry + DNS-resolution scan
 //
-var registryPath = Path.Combine(
-    Environment.GetFolderPath(
-        Environment.SpecialFolder.UserProfile),
-    "dn42-registry",
-    "data",
-    "dns");
+var registryPath =
+    Path.Combine(
+        Environment.GetFolderPath(
+            Environment.SpecialFolder.UserProfile),
+        "dn42-registry",
+        "data",
+        "dns");
 
 var registryDomains =
     new List<DomainObject>();
@@ -383,17 +396,20 @@ foreach (var domain in
             await Dns.GetHostAddressesAsync(
                 domain.Domain);
 
-        var result = new DomainResolution
-        {
-            Domain = domain.Domain,
+        var result =
+            new DomainResolution
+            {
+                Domain =
+                    domain.Domain,
 
-            Status = addresses.Length > 0
-                ? ResolutionStatus.Resolved
-                : ResolutionStatus.NotFound,
+                Status =
+                    addresses.Length > 0
+                        ? ResolutionStatus.Resolved
+                        : ResolutionStatus.NotFound,
 
-            Addresses =
-                addresses.ToList()
-        };
+                Addresses =
+                    addresses.ToList()
+            };
 
         resolutions.Add(result);
 
