@@ -1,10 +1,11 @@
 using DN42Atlas.Reporting;
+using DN42Atlas.Policy;
 
 namespace DN42Atlas.Commands;
 
 public static class ReportCommand
 {
-    public static async Task ExecuteAsync(string[] args)
+    public static async Task ExecuteAsync(string[] args, ExclusionPolicy exclusionPolicy)
     {
         if (args.Length < 2)
         {
@@ -32,7 +33,8 @@ public static class ReportCommand
 
         await AtlasReportGenerator.GenerateAsync(
             inputPath,
-            htmlPath);
+            htmlPath,
+            exclusionPolicy);
 
         Console.WriteLine(
             $"Atlas viewer written to: {htmlPath}");

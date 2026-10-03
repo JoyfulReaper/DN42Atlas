@@ -93,15 +93,15 @@ During the default registry/DNS command, hostname exclusions are checked before 
 
 `web-scan` checks hostname exclusions again when loading an existing resolution file. It then checks every saved address against prefix exclusions before probing. A hostname match or any matching address skips the entire domain: excluded scan targets are not probed and do not appear as service results in the scan JSON or its generated viewer.
 
-The public scan JSON records `ExcludedByHostname` and `ExcludedByPrefix` counts, without publishing the matched excluded hostnames or prefix rules. Console diagnostics can include the matched hostname, address, and rule.
+The public scan JSON records `ExcludedByHostname` and `ExcludedByPrefix` counts, without publishing the matched excluded hostnames or prefix rules. Excluded links and hostname mentions are removed; excluded identifiers in other metadata are redacted. This filtering does not resolve or probe discovered references. Console diagnostics can include the matched hostname, address, and rule.
 
 `robots.txt` controls HTTP page-content fetching. Atlas still requests `/robots.txt` and can record the origin and robots status when homepage fetching is disallowed. Complete exclusion removes the target from the scan entirely, before those HTTP requests.
 
-These filters apply to registry resolution and `web-scan` targets. The development-only `probe-test` directly probes its fixed host without applying hostname, prefix, or DN42 address filters. `report` renders the supplied JSON without reapplying exclusions; changing the policy does not remove entries from old scan files. Links and hostname mentions extracted from allowed pages are references, not probe targets, and are not filtered by the exclusion policy.
+`probe-test` also checks hostname exclusions before DNS and validates the entire resolved address set before probing. `report` reapplies current hostname exclusions and reference redaction when generating HTML, without changing the input snapshot or making network requests. Historical service results do not include destination addresses, so their current prefix membership cannot be verified offline; review old snapshots before publishing them under a changed prefix policy.
 
 ## DN42 Address Guard
 
-Before probing a hostname from a resolution file, `web-scan` verifies that all its saved addresses fall within expected DN42 address space.
+Before probing a hostname from a resolution file, `web-scan` requires a valid DNS hostname ending in `.dn42` and verifies that all its saved addresses fall within expected DN42 address space. Conflicting duplicate rows cannot override an exclusion or an unsafe address set.
 
 Currently accepted ranges include:
 
@@ -114,6 +114,8 @@ fd00::/8
 ```
 
 Domains with any address outside these ranges, including mixed DN42/external results, are skipped rather than allowing DNS records to direct the scanner onto arbitrary clearnet hosts.
+
+HTTP connections are pinned to the validated addresses while retaining the hostname for HTTP Host and TLS SNI. `web-scan` does not resolve the hostname again during probing or use ambient HTTP proxies. A stale resolution file can therefore produce failed probes rather than silently switching to a new destination; regenerate DNS results when needed.
 
 ## Requirements
 
@@ -164,11 +166,14 @@ DN42Atlas/
     WebScanResult.cs
   Networking/
     Dn42AddressSpace.cs
+    ProbeDestination.cs
+    PinnedHttpConnection.cs
   Probing/
     HttpProber.cs
     HttpProbeTargets.cs
   Policy/
     ExclusionPolicy.cs
+    PublicScanPolicy.cs
   Registry/
     DomainParser.cs
     DomainObject.cs
@@ -186,6 +191,7 @@ config/
 
 `Probing/HttpProber.cs`, `Policy/ExclusionPolicy.cs`, the registry models/parser,
 and `Reporting/AtlasReportGenerator.cs` retain their existing responsibilities.
+Networking also validates probe destinations and pins HTTP connections; `PublicScanPolicy` filters public metadata and report inputs.
 Both exclusion files remain required before command dispatch. Registry hostname
 exclusions run before DNS; saved-resolution hostname exclusions, prefix exclusions,
 and the DN42 address guard run before web probing.
@@ -196,7 +202,7 @@ Run the automated tests from the repository root:
 dotnet test
 ```
 
-Tests use temporary fixtures and fake DNS/probe functions; they do not contact DN42
+Tests use temporary fixtures, fake DNS/probe functions, HTTP responses, and in-memory connection streams; they do not contact DN42
 or external services. MSTest is used only by the test project; CIDR matching uses
 the existing implementation without additional networking packages.
 
@@ -237,7 +243,7 @@ dotnet run --project DN42Atlas -- probe-test
 
 This is useful for checking HTTP probing, TLS handling, robots parsing, homepage metadata extraction, and link discovery before running a full scan.
 
-Results are printed to the console; this command does not write scan JSON or an HTML viewer. It requires both exclusion files at startup, but directly probes `burble.dn42` without the scan filters described above.
+Results are printed to the console; this command does not write scan JSON or an HTML viewer. It requires both exclusion files and skips its fixed host when hostname, prefix, or DN42 address checks reject it.
 
 ### Web Scan
 
@@ -292,7 +298,7 @@ dotnet run --project DN42Atlas -- web-scan \
 
 You do not need to rescan the network to generate the HTML viewer.
 
-The command is `report <web-probe.json>`. It uses the supplied results as-is and writes an HTML file alongside the JSON with the same basename.
+The command is `report <web-probe.json>`. It filters supplied results and references against current hostname exclusions, safely embeds the JSON, and writes an HTML file alongside the JSON with the same basename. It does not alter the source snapshot or re-probe services; historical prefix limitations are described under Complete Exclusion.
 
 ```bash
 dotnet run --project DN42Atlas -- \

@@ -2,6 +2,8 @@ using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
 using DN42Atlas.Registry;
+using DN42Atlas.Networking;
+using DN42Atlas.Policy;
 
 namespace DN42Atlas.Probing;
 
@@ -41,24 +43,27 @@ public static class HttpProber
         string domain,
         string scheme,
         int port,
+        ExclusionPolicy exclusionPolicy,
+        IReadOnlyList<IPAddress> addresses,
         CancellationToken cancellationToken = default)
     {
-        var handler = new SocketsHttpHandler
-        {
-            AllowAutoRedirect = false,
-            ConnectTimeout = TimeSpan.FromSeconds(5),
+        var approvedAddresses = addresses.ToArray();
+        if (!ProbeDestination.IsAllowed(exclusionPolicy, domain, approvedAddresses))
+            throw new InvalidOperationException("Probe destination is excluded or outside DN42.");
 
-            SslOptions =
-            {
-                RemoteCertificateValidationCallback =
-                    (_, _, _, _) => true
-            }
-        };
-
-        using var client = new HttpClient(handler)
+        using var client = new HttpClient(PinnedHttpConnection.CreateHandler(domain, approvedAddresses))
         {
             Timeout = TimeSpan.FromSeconds(10)
         };
+
+        return await ProbeAsync(domain, scheme, port, client, TimeSpan.FromSeconds(10), cancellationToken);
+    }
+
+    // Tests supply responses here; production always uses the policy-checked pinned transport above.
+    internal static async Task<HttpProbeResult> ProbeAsync(
+        string domain, string scheme, int port, HttpClient client, TimeSpan requestTimeout,
+        CancellationToken cancellationToken = default)
+    {
 
         var defaultPort =
             (scheme == "http" && port == 80) ||
@@ -84,6 +89,8 @@ public static class HttpProber
         //
         try
         {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(requestTimeout);
             using var request =
                 new HttpRequestMessage(
                     HttpMethod.Get,
@@ -95,7 +102,7 @@ public static class HttpProber
                 await client.SendAsync(
                     request,
                     HttpCompletionOption.ResponseHeadersRead,
-                    cancellationToken);
+                    deadline.Token);
 
             robotsStatusCode =
                 (int)response.StatusCode;
@@ -109,16 +116,16 @@ public static class HttpProber
                     await ReadTextLimitedAsync(
                         response.Content,
                         MaxRobotsBytes,
-                        cancellationToken);
+                        deadline.Token);
 
-                robotsAllowed =
+                robotsAllowed = robotsBody.Truncated ? null :
                     IsPathAllowed(
                         robotsBody.Text,
                         "DN42Atlas",
                         "/");
 
                 robotsStatus =
-                    robotsAllowed.Value
+                    robotsAllowed == null ? RobotsStatus.Unavailable : robotsAllowed.Value
                         ? RobotsStatus.Allowed
                         : RobotsStatus.Disallowed;
             }
@@ -141,7 +148,7 @@ public static class HttpProber
         }
         catch (Exception ex) when (
             ex is HttpRequestException or
-            TaskCanceledException)
+            OperationCanceledException or IOException)
         {
             return new HttpProbeResult
             {
@@ -192,6 +199,8 @@ public static class HttpProber
         //
         try
         {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(requestTimeout);
             using var request =
                 new HttpRequestMessage(
                     HttpMethod.Get,
@@ -203,7 +212,7 @@ public static class HttpProber
                 await client.SendAsync(
                     request,
                     HttpCompletionOption.ResponseHeadersRead,
-                    cancellationToken);
+                    deadline.Token);
 
             var statusCode =
                 (int)response.StatusCode;
@@ -239,7 +248,7 @@ public static class HttpProber
                     await ReadTextLimitedAsync(
                         response.Content,
                         MaxHomepageBytes,
-                        cancellationToken);
+                        deadline.Token);
 
                 contentTruncated =
                     body.Truncated;
@@ -319,7 +328,7 @@ public static class HttpProber
         }
         catch (Exception ex) when (
             ex is HttpRequestException or
-            TaskCanceledException)
+            OperationCanceledException or IOException)
         {
             return new HttpProbeResult
             {
@@ -633,14 +642,37 @@ public static class HttpProber
             truncated);
     }
 
-    private static bool IsPathAllowed(
+    private static bool? IsPathAllowed(
         string robotsText,
         string userAgent,
         string path)
     {
+        robotsText = robotsText.TrimStart('\uFEFF');
+        // A nonempty response without a recognizable policy is ambiguous, not permission.
+        if (!string.IsNullOrWhiteSpace(robotsText) &&
+            robotsText.Split('\n').Any(line =>
+            {
+                var value = line.Split('#', 2)[0].Trim();
+                if (value.Length == 0) return false;
+                var colon = value.IndexOf(':');
+                if (colon <= 0) return true;
+                var field = value[..colon].Trim();
+                var directive = value[(colon + 1)..].Trim();
+                if (field.Equals("User-agent", StringComparison.OrdinalIgnoreCase))
+                    return directive.Length == 0;
+                if (field.Equals("Allow", StringComparison.OrdinalIgnoreCase) ||
+                    field.Equals("Disallow", StringComparison.OrdinalIgnoreCase))
+                    return directive.Length > 0 && !directive.StartsWith('/');
+                return false;
+            }))
+            return null;
+
         var groups =
             ParseRobotsGroups(
                 robotsText);
+
+        if (groups.Count == 0 && robotsText.Split('\n').Any(line => line.Split('#', 2)[0].Trim().Length > 0))
+            return null;
 
         var applicable =
             groups

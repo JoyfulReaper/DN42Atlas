@@ -20,13 +20,13 @@ var probeTargets = HttpProbeTargets.All;
 switch (args.FirstOrDefault())
 {
     case "report":
-        await ReportCommand.ExecuteAsync(args);
+        await ReportCommand.ExecuteAsync(args, exclusionPolicy);
         break;
     case "probe-test":
-        await new ProbeTestCommand(probeTargets).ExecuteAsync();
+        await new ProbeTestCommand(probeTargets, exclusionPolicy).ExecuteAsync();
         break;
     case "web-scan":
-        await new WebScanCommand(new WebScanner(exclusionPolicy, probeTargets), probeTargets)
+        await new WebScanCommand(new WebScanner(exclusionPolicy, probeTargets), probeTargets, exclusionPolicy)
             .ExecuteAsync(args);
         break;
     default:

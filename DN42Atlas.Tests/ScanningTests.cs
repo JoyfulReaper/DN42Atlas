@@ -75,7 +75,7 @@ public sealed class ScanningTests
         try
         {
             Environment.CurrentDirectory = files.DirectoryPath;
-            await new WebScanCommand(scanner, HttpProbeTargets.All).ExecuteAsync(["web-scan", resolutionPath]);
+            await new WebScanCommand(scanner, HttpProbeTargets.All, files.LoadPolicy()).ExecuteAsync(["web-scan", resolutionPath]);
         }
         finally
         {
@@ -102,7 +102,55 @@ public sealed class ScanningTests
         var actual = results.Select(x => (x.GetProperty("Domain").GetString(), x.GetProperty("Scheme").GetString(), x.GetProperty("Port").GetInt32())).ToArray();
         var expected = new[] { "a.dn42", "z.DN42" }.SelectMany(domain => HttpProbeTargets.All.Select(target => (domain, target.Scheme, target.Port))).OrderBy(x => x.domain).ThenBy(x => x.Scheme).ThenBy(x => x.Port).ToArray();
         CollectionAssert.AreEqual(expected, actual);
+        CollectionAssert.AreEqual(new[] { "Domain", "Scheme", "Port", "Reachable", "StatusCode", "ContentType", "Title", "HomepageRedirectLocation", "HomepageError", "ContentTruncated", "Robots", "RobotsStatusCode", "RobotsAllowed", "RedirectLocation", "DiscoveredLinks", "LinksTruncated", "Dn42Mentions", "Dn42MentionsTruncated", "Error" }, results[0].EnumerateObject().Select(x => x.Name).ToArray());
         Assert.AreEqual(JsonSerializer.SerializeToElement(new HttpProbeResult { Domain = "a.dn42", Scheme = "http", Port = 80, Reachable = true }).GetRawText(), JsonSerializer.Serialize(results[0]));
+    }
+
+    [TestMethod]
+    [DataRow("172.20.1.1")]
+    [DataRow("192.0.2.1")]
+    public async Task ConflictingDuplicateRowsRejectTheEntireHostname(string rejected)
+    {
+        using var files = new TestFiles(prefixes: "172.20.1.0/24");
+        var path = files.Write("resolution.json", JsonSerializer.Serialize(new[]
+        {
+            new { Domain = "good.dn42", Status = "Resolved", Addresses = new[] { "fd42::1" } },
+            new { Domain = "GOOD.DN42", Status = "Resolved", Addresses = new[] { rejected } }
+        }));
+        var scanner = new WebScanner(files.LoadPolicy(), HttpProbeTargets.All,
+            (_, _, _, _) => throw new AssertFailedException("Rejected duplicate must not become a probe target."));
+        var scan = await scanner.ScanAsync(path);
+        Assert.HasCount(0, scan.Results);
+        Assert.AreEqual(0, scan.ProbeTargetCount);
+    }
+
+    [TestMethod]
+    public async Task ConflictingExternalAndExcludedRowsDoNotPublishTheExcludedDomain()
+    {
+        using var files = new TestFiles(prefixes: "172.20.1.0/24");
+        var path = files.Write("resolution.json", """
+            [{"Domain":"private.dn42","Status":"Resolved","Addresses":["192.0.2.1"]},
+             {"Domain":"PRIVATE.DN42","Status":"Resolved","Addresses":["172.20.1.1"]}]
+            """);
+        var scanner = new WebScanner(files.LoadPolicy(), HttpProbeTargets.All,
+            (_, _, _, _) => throw new AssertFailedException("Excluded domain must never be probed."));
+        var scan = await scanner.ScanAsync(path);
+        Assert.HasCount(0, scan.Results);
+        Assert.HasCount(0, scan.SkippedExternal);
+        Assert.AreEqual(1, scan.ExcludedByPrefix);
+    }
+
+    [TestMethod]
+    public async Task UriSyntaxInSavedDomainNeverBecomesAProbeTarget()
+    {
+        using var files = new TestFiles();
+        var path = files.Write("resolution.json", """
+            [{"Domain":"outside.example/#.dn42","Status":"Resolved","Addresses":["fd42::1"]},
+             {"Domain":"allowed.dn42/path.dn42","Status":"Resolved","Addresses":["fd42::1"]}]
+            """);
+        var scanner = new WebScanner(files.LoadPolicy(), HttpProbeTargets.All,
+            (_, _, _, _) => throw new AssertFailedException("URI syntax must never become a probe target."));
+        Assert.HasCount(0, (await scanner.ScanAsync(path)).Results);
     }
 
     [TestMethod]

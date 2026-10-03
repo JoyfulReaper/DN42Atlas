@@ -25,6 +25,25 @@ public sealed class CommandTests
     }
 
     [TestMethod]
+    public async Task CliWebScanAndReportGenerateCompatibleFilesWithoutNetworkAccess()
+    {
+        using var files = new TestFiles();
+        var config = Path.Combine(files.DirectoryPath, "config");
+        Directory.CreateDirectory(config);
+        File.Copy(files.HostsPath, Path.Combine(config, "excluded-hosts.txt"));
+        File.Copy(files.PrefixesPath, Path.Combine(config, "excluded-prefixes.txt"));
+        files.Write("domain-resolution.json.bk2", "[]");
+        var scan = await RunCliAsync(files.DirectoryPath, "web-scan");
+        Assert.AreEqual(0, scan.ExitCode);
+        Assert.Contains("Scan complete.", scan.Output);
+        var jsonPath = Directory.GetFiles(Path.Combine(files.DirectoryPath, "results"), "web-probe-*.json").Single();
+        var report = await RunCliAsync(files.DirectoryPath, $"report results/{Path.GetFileName(jsonPath)}");
+        Assert.AreEqual(0, report.ExitCode);
+        Assert.Contains("Atlas viewer written to:", report.Output);
+        Assert.IsTrue(File.Exists(Path.ChangeExtension(jsonPath, ".html")));
+    }
+
+    [TestMethod]
     [DataRow(true)]
     [DataRow(false)]
     public async Task CliFailsClosedBeforeDispatchIfEitherPolicyFileIsMissing(bool missingHosts)

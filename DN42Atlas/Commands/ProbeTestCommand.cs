@@ -1,17 +1,38 @@
 using DN42Atlas.Probing;
+using DN42Atlas.Policy;
+using DN42Atlas.Networking;
+using DN42Atlas.Registry;
+using System.Net;
 
 namespace DN42Atlas.Commands;
 
-public sealed class ProbeTestCommand(IReadOnlyList<(string, int)> probeTargets)
+public sealed class ProbeTestCommand(
+    IReadOnlyList<(string, int)> probeTargets,
+    ExclusionPolicy exclusionPolicy,
+    Func<string, Task<IPAddress[]>>? resolveAsync = null,
+    Func<string, string, int, CancellationToken, Task<HttpProbeResult>>? probeAsync = null)
 {
     public async Task ExecuteAsync()
     {
+        const string hostname = "burble.dn42";
+        if (exclusionPolicy.IsHostExcluded(hostname))
+        {
+            Console.WriteLine("Probe-test skipped: host is excluded.");
+            return;
+        }
+
+        var addresses = await (resolveAsync?.Invoke(hostname) ?? Dns.GetHostAddressesAsync(hostname));
+        if (!ProbeDestination.IsAllowed(exclusionPolicy, hostname, addresses))
+        {
+            Console.WriteLine("Probe-test skipped: addresses are excluded or outside DN42.");
+            return;
+        }
+
         var tasks =
             probeTargets.Select(target =>
-                HttpProber.ProbeAsync(
-                    "burble.dn42",
-                    target.Item1,
-                    target.Item2));
+                probeAsync != null
+                    ? probeAsync(hostname, target.Item1, target.Item2, CancellationToken.None)
+                    : HttpProber.ProbeAsync(hostname, target.Item1, target.Item2, exclusionPolicy, addresses));
 
         var results =
             await Task.WhenAll(tasks);

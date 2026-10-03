@@ -9,14 +9,14 @@ namespace DN42Atlas.Scanning;
 
 public sealed class WebScanner
 {
-    private readonly Func<string, string, int, CancellationToken, Task<HttpProbeResult>> probeAsync;
+    private readonly Func<string, string, int, CancellationToken, Task<HttpProbeResult>>? probeAsync;
 
     public WebScanner(ExclusionPolicy exclusionPolicy, IReadOnlyList<(string, int)> probeTargets,
         Func<string, string, int, CancellationToken, Task<HttpProbeResult>>? probeAsync = null)
     {
         this.exclusionPolicy = exclusionPolicy;
         this.probeTargets = probeTargets;
-        this.probeAsync = probeAsync ?? HttpProber.ProbeAsync;
+        this.probeAsync = probeAsync;
     }
 
     private readonly ExclusionPolicy exclusionPolicy;
@@ -34,6 +34,10 @@ public sealed class WebScanner
 
         var skippedExternal =
             new List<string>();
+
+        var approvedAddresses = new Dictionary<string, IReadOnlyList<System.Net.IPAddress>>(StringComparer.OrdinalIgnoreCase);
+        var rejectedDomains = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var excludedPrefixDomains = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         var excludedByHostname = 0;
         var excludedByPrefix = 0;
@@ -53,11 +57,7 @@ public sealed class WebScanner
                         "Status")
                     .GetString();
 
-            if (string.IsNullOrWhiteSpace(
-                domain) ||
-                !domain.EndsWith(
-                    ".dn42",
-                    StringComparison.OrdinalIgnoreCase))
+            if (!ProbeDestination.IsDn42Hostname(domain))
             {
                 continue;
             }
@@ -93,7 +93,10 @@ public sealed class WebScanner
                     .ToList();
 
             if (addresses.Count == 0)
+            {
+                rejectedDomains.Add(domain);
                 continue;
+            }
 
             string? matchedPrefixRule = null;
             string? matchedExcludedAddress = null;
@@ -119,6 +122,8 @@ public sealed class WebScanner
             if (matchedExcludedAddress != null)
             {
                 excludedByPrefix++;
+                rejectedDomains.Add(domain);
+                excludedPrefixDomains.Add(domain);
 
                 Console.WriteLine(
                     $"[exclude] {domain} " +
@@ -142,15 +147,24 @@ public sealed class WebScanner
             {
                 skippedExternal.Add(
                     domain);
+                rejectedDomains.Add(domain);
 
                 continue;
             }
 
             domains.Add(domain);
+            // Benign duplicate rows contribute only already validated addresses.
+            approvedAddresses[domain] = approvedAddresses.TryGetValue(domain, out var previous)
+                ? previous.Concat(addresses.Select(System.Net.IPAddress.Parse)).Distinct().ToArray()
+                : addresses.Select(System.Net.IPAddress.Parse).ToArray();
         }
+
+        // A conflicting external row must not publish the name of a prefix-excluded domain.
+        skippedExternal.RemoveAll(excludedPrefixDomains.Contains);
 
         domains =
             domains
+                .Where(domain => !rejectedDomains.Contains(domain))
                 .Distinct(
                     StringComparer.OrdinalIgnoreCase)
                 .OrderBy(x => x)
@@ -210,11 +224,10 @@ public sealed class WebScanner
                 cancellationToken) =>
             {
                 var result =
-                    await probeAsync(
-                        item.Domain,
-                        item.Scheme,
-                        item.Port,
-                        cancellationToken);
+                    await (probeAsync != null
+                        ? probeAsync(item.Domain, item.Scheme, item.Port, cancellationToken)
+                        : HttpProber.ProbeAsync(item.Domain, item.Scheme, item.Port,
+                            exclusionPolicy, approvedAddresses[item.Domain], cancellationToken));
 
                 results.Add(result);
 

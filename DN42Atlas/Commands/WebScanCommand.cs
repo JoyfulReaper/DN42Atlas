@@ -1,10 +1,11 @@
 using System.Text.Json;
 using DN42Atlas.Reporting;
 using DN42Atlas.Scanning;
+using DN42Atlas.Policy;
 
 namespace DN42Atlas.Commands;
 
-public sealed class WebScanCommand(WebScanner scanner, IReadOnlyList<(string, int)> probeTargets)
+public sealed class WebScanCommand(WebScanner scanner, IReadOnlyList<(string, int)> probeTargets, ExclusionPolicy exclusionPolicy)
 {
     public async Task ExecuteAsync(string[] args)
     {
@@ -49,8 +50,8 @@ public sealed class WebScanCommand(WebScanner scanner, IReadOnlyList<(string, in
                 resultsDirectory,
                 $"web-probe-{timestamp}.json");
 
-        var webJson =
-            JsonSerializer.Serialize(
+        var publicScan =
+            JsonSerializer.SerializeToNode(
                 new
                 {
                     GeneratedAt =
@@ -105,11 +106,9 @@ public sealed class WebScanCommand(WebScanner scanner, IReadOnlyList<(string, in
                     //
                     Results =
                         orderedResults
-                },
-                new JsonSerializerOptions
-                {
-                    WriteIndented = true
-                });
+                })!;
+        new PublicScanPolicy(exclusionPolicy).Apply(publicScan);
+        var webJson = publicScan.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
 
         await File.WriteAllTextAsync(
             webOutputPath,
@@ -126,7 +125,8 @@ public sealed class WebScanCommand(WebScanner scanner, IReadOnlyList<(string, in
 
         await AtlasReportGenerator.GenerateAsync(
             webOutputPath,
-            viewerOutputPath);
+            viewerOutputPath,
+            exclusionPolicy);
 
         Console.WriteLine();
         Console.WriteLine(

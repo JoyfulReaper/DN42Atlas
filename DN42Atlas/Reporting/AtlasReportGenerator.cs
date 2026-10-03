@@ -1,5 +1,6 @@
 using System.Text;
-using System.Text.Json;
+using System.Text.Json.Nodes;
+using DN42Atlas.Policy;
 
 namespace DN42Atlas.Reporting;
 
@@ -8,6 +9,7 @@ public static class AtlasReportGenerator
     public static async Task GenerateAsync(
         string inputPath,
         string outputPath,
+        ExclusionPolicy exclusionPolicy,
         CancellationToken cancellationToken = default)
     {
         var scanJson =
@@ -18,8 +20,10 @@ public static class AtlasReportGenerator
         //
         // Validate before embedding it.
         //
-        using var document =
-            JsonDocument.Parse(scanJson);
+        var publicScan = JsonNode.Parse(scanJson) ?? throw new InvalidDataException("Scan JSON must not be null.");
+        new PublicScanPolicy(exclusionPolicy).Apply(publicScan);
+        // Safe JSON serialization prevents string values from closing the HTML script element.
+        scanJson = publicScan.ToJsonString();
 
         var html = $$"""
 <!doctype html>
@@ -372,6 +376,9 @@ const allResults =
         : [];
 
 function originFor(result) {
+    if (result.Scheme !== "http" && result.Scheme !== "https")
+        return "#";
+
     const defaultPort =
         (result.Scheme === "http" &&
          result.Port === 80) ||
