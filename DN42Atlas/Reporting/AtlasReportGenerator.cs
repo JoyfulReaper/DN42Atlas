@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Net;
 using System.Text;
 using System.Text.Json.Nodes;
 using DN42Atlas.Policy;
@@ -22,6 +24,28 @@ public static class AtlasReportGenerator
         //
         var publicScan = JsonNode.Parse(scanJson) ?? throw new InvalidDataException("Scan JSON must not be null.");
         new PublicScanPolicy(exclusionPolicy).Apply(publicScan);
+
+        var lastScanHtml = string.Empty;
+        if (publicScan["GeneratedAt"] is JsonValue generatedAtValue &&
+            generatedAtValue.TryGetValue<string>(out var generatedAtText) &&
+            DateTimeOffset.TryParse(
+                generatedAtText,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind,
+                out var generatedAt))
+        {
+            var generatedAtUtc = generatedAt.ToUniversalTime();
+            var machineTimestamp = WebUtility.HtmlEncode(
+                generatedAtUtc.ToString("O", CultureInfo.InvariantCulture));
+            var displayTimestamp = WebUtility.HtmlEncode(
+                generatedAtUtc.ToString(
+                    "yyyy-MM-dd HH:mm:ss 'UTC'",
+                    CultureInfo.InvariantCulture));
+
+            lastScanHtml =
+                $"<p class=\"last-scan\">Last scan: <time datetime=\"{machineTimestamp}\">{displayTimestamp}</time></p>";
+        }
+
         // Safe JSON serialization prevents string values from closing the HTML script element.
         scanJson = publicScan.ToJsonString();
 
@@ -66,6 +90,17 @@ public static class AtlasReportGenerator
     .subtitle {
         margin-top: .4rem;
         color: #8b949e;
+    }
+
+    .site-nav,
+    .footer-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+    }
+
+    .site-nav {
+        margin-top: .75rem;
     }
 
     main {
@@ -238,6 +273,19 @@ public static class AtlasReportGenerator
         margin-top: 2rem;
         text-align: center;
     }
+
+    .footer p {
+        margin: .65rem 0;
+    }
+
+    .footer-links {
+        justify-content: center;
+    }
+
+    .last-scan,
+    .hosting-note {
+        font-size: .85rem;
+    }
 </style>
 </head>
 
@@ -249,6 +297,14 @@ public static class AtlasReportGenerator
     <div class="subtitle">
         A polite map of public stuff on DN42.
     </div>
+
+    <nav
+        class="site-nav"
+        aria-label="Project information">
+        <a href="/about.html">About</a>
+        <a href="/opt-out.html">Opt out</a>
+        <a href="https://github.com/JoyfulReaper/DN42Atlas">Source</a>
+    </nav>
 </header>
 
 <main>
@@ -353,9 +409,31 @@ public static class AtlasReportGenerator
 
 </section>
 
-<div class="footer">
-    DN42Atlas does not automatically follow discovered links.
-</div>
+<footer class="footer">
+    <p>
+        DN42Atlas does not automatically follow discovered links.
+    </p>
+
+    {{lastScanHtml}}
+
+    <nav
+        class="footer-links"
+        aria-label="Project information">
+        <span>AS4242420425</span>
+        <a href="/about.html">About</a>
+        <a href="/opt-out.html">Opt out</a>
+        <a href="https://github.com/JoyfulReaper/DN42Atlas">Source</a>
+    </nav>
+
+    <p class="hosting-note">
+        Infrastructure note:
+        <a
+            href="https://greencloudvps.com/billing/aff.php?aff=10295"
+            target="_blank"
+            rel="sponsored noopener noreferrer">GreenCloud VPS</a>
+        is an affiliate link; the operator may earn a commission.
+    </p>
+</footer>
 
 </main>
 

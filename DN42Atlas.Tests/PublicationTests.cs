@@ -67,5 +67,48 @@ public sealed class PublicationTests
         Assert.AreEqual("</ScRiPt><script>alert(1)</script>", embedded.RootElement.GetProperty("Results")[0].GetProperty("Title").GetString());
         // The source snapshot is immutable; only the newly generated HTML is filtered.
         Assert.AreEqual(originalJson, await File.ReadAllTextAsync(input));
+        Assert.IsFalse(html.Contains("Last scan:", StringComparison.Ordinal));
+        Assert.IsFalse(embedded.RootElement.TryGetProperty("GeneratedAt", out _));
+    }
+
+    [TestMethod]
+    public async Task GeneratedViewerIncludesPublicNavigationFooterAndScanTimestamp()
+    {
+        using var files = new TestFiles();
+        var input = files.Write("scan.json", """
+            {
+              "GeneratedAt":"2026-10-03T00:42:03.4461149-04:00",
+              "Results":[]
+            }
+            """);
+        var output = Path.ChangeExtension(input, ".html");
+
+        await AtlasReportGenerator.GenerateAsync(
+            input,
+            output,
+            files.LoadPolicy());
+
+        var html = await File.ReadAllTextAsync(output);
+
+        StringAssert.Contains(html, "href=\"/about.html\"");
+        StringAssert.Contains(html, "href=\"/opt-out.html\"");
+        StringAssert.Contains(
+            html,
+            "href=\"https://github.com/JoyfulReaper/DN42Atlas\"");
+        StringAssert.Contains(
+            html,
+            "DN42Atlas does not automatically follow discovered links.");
+        StringAssert.Contains(html, "AS4242420425");
+        StringAssert.Contains(html, "Last scan:");
+        StringAssert.Contains(html, "2026-10-03 04:42:03 UTC");
+        StringAssert.Contains(
+            html,
+            "href=\"https://greencloudvps.com/billing/aff.php?aff=10295\"");
+        StringAssert.Contains(
+            html,
+            "rel=\"sponsored noopener noreferrer\"");
+        StringAssert.Contains(html, "target=\"_blank\"");
+        StringAssert.Contains(html, "is an affiliate link");
+        StringAssert.Contains(html, "the operator may earn a commission");
     }
 }
