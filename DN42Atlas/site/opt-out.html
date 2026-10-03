@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Opt out of DN42Atlas</title>
+    <style>
+        :root { color-scheme: dark; font-family: ui-monospace, Consolas, monospace; }
+        body { margin: 0; background: #0d1117; color: #c9d1d9; line-height: 1.6; }
+        main { max-width: 850px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+        h1, h2 { color: #f0f6fc; }
+        a { color: #58a6ff; }
+        pre { padding: 1rem; background: #161b22; overflow-x: auto; }
+    </style>
+</head>
+<body>
+<main>
+    <p><a href="index.html">Back to DN42Atlas</a></p>
+    <h1>Opt out of DN42Atlas</h1>
+    <p>DN42Atlas discovers publicly reachable HTTP and HTTPS services on DN42
+        and generates a static service directory.</p>
+    <h2>Complete exclusion</h2>
+    <p>If you operate a DN42 hostname or address prefix and want it excluded,
+        <a href="https://github.com/JoyfulReaper/DN42Atlas/issues">open an issue in the DN42Atlas repository</a>.
+        Include the hostname or IPv4/IPv6 prefix you operate and want excluded.
+        Requests are reviewed and applied manually; submitting an issue does not immediately change the exclusion policy.</p>
+    <p>Complete exclusions prevent Atlas probing and inclusion in generated results.
+        Hostname rules can cover an exact hostname or its subdomains;
+        prefix rules can cover IPv4 or IPv6 CIDR ranges.</p>
+    <h2>robots.txt and page content</h2>
+    <p>To prevent HTTP page-content fetching, place this rule in your robots.txt:</p>
+    <pre>User-agent: DN42Atlas
+Disallow: /</pre>
+    <p>Robots rules control page-content fetching. Atlas may still request robots.txt
+        and record the origin's reachability. Request complete exclusion to prevent probing entirely.</p>
+</main>
+</body>
+</html>

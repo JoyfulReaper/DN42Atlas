@@ -138,6 +138,7 @@ public sealed class CommandTests
         Assert.AreEqual(await File.ReadAllTextAsync(json), await File.ReadAllTextAsync(Path.Combine(published, "latest.json")));
         Assert.AreEqual(await File.ReadAllTextAsync(Path.ChangeExtension(json, ".html")),
             await File.ReadAllTextAsync(Path.Combine(published, "index.html")));
+        Assert.IsTrue(File.Exists(Path.Combine(published, "opt-out.html")));
     }
 
     [TestMethod]

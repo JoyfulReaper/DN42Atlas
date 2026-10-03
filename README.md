@@ -240,9 +240,14 @@ dotnet run --project DN42Atlas -- run
 published/
   index.html
   latest.json
+  opt-out.html
 ```
 
-Both files are staged in `published/`, flushed and closed, then individually replaced by same-directory atomic renames. Generation or staging failures leave the previous published files intact. The two replacements are not a single transaction: a crash or replacement failure between them can leave JSON and HTML from different runs. The HTML viewer is self-contained and does not load `latest.json`.
+`published/` is the production static web root. Its `index.html` and `latest.json` contain the current public artifact; `results/` holds timestamped historical data and is separate from this web root.
+
+The application owns and updates only the generated `index.html` and `latest.json`. On first publication it also installs a self-contained `opt-out.html` from the bundled `DN42Atlas/site/opt-out.html` template if that page is absent. Existing `published/opt-out.html` is preserved byte-for-byte, so operators can maintain it manually. Other pages and assets in `published/` are left untouched. Template changes require a rebuild and do not automatically replace an installed page; update that page manually when needed.
+
+Generated files are staged in `published/`, flushed and closed, then individually replaced by same-directory atomic renames. The opt-out page uses the same staging process but is installed without replacing an existing file. Generation or staging failures leave the previous published files intact. The two generated-file replacements are not a single transaction: a crash or replacement failure between them can leave JSON and HTML from different runs. The HTML viewer is self-contained and does not load `latest.json`.
 
 The command stops and returns nonzero if a stage fails. Standalone `web-scan` and `report` keep their existing outputs and do not update `published/`. No web-server configuration, deployment, or scheduling is performed; a server may be configured separately to serve this directory. Temporary staging filenames begin with a dot and end in `.tmp`; servers should not expose these files.
 

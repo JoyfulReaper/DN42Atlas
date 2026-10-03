@@ -24,7 +24,38 @@ public sealed class ArtifactPublisherTests
         Assert.AreEqual(await File.ReadAllTextAsync(nextHtml), await File.ReadAllTextAsync(Path.Combine(published, "index.html")));
         Assert.AreEqual("{\"Results\":[]}", await File.ReadAllTextAsync(json));
         Assert.AreEqual("<!doctype html><title>Atlas</title>", await File.ReadAllTextAsync(html));
-        Assert.HasCount(2, Directory.GetFiles(published));
+        Assert.HasCount(3, Directory.GetFiles(published));
+        var optOut = await File.ReadAllTextAsync(Path.Combine(published, "opt-out.html"));
+        Assert.Contains("Opt out of DN42Atlas", optOut);
+        Assert.Contains("https://github.com/JoyfulReaper/DN42Atlas/issues", optOut);
+        Assert.Contains("href=\"index.html\"", optOut);
+    }
+
+    [TestMethod]
+    public async Task RepeatedPublicationPreservesManuallyMaintainedPagesAndAssets()
+    {
+        using var files = new TestFiles();
+        var json = files.Write("scan.json", "{\"Results\":[]}");
+        files.Write("scan.html", "new report");
+        var published = Path.Combine(files.DirectoryPath, "published");
+        await ArtifactPublisher.PublishAsync(json, published);
+        var optOut = Path.Combine(published, "opt-out.html");
+        byte[] customPage = [0xEF, 0xBB, 0xBF, 65, 66, 67, 13, 10];
+        await File.WriteAllBytesAsync(optOut, customPage);
+        var about = Path.Combine(published, "about.html");
+        var css = Path.Combine(published, "site.css");
+        await File.WriteAllTextAsync(about, "manual about page");
+        await File.WriteAllTextAsync(css, "manual styles");
+        for (var i = 0; i < 2; i++)
+        {
+            files.Write("scan.html", $"report {i}");
+            await ArtifactPublisher.PublishAsync(json, published);
+            CollectionAssert.AreEqual(customPage, await File.ReadAllBytesAsync(optOut));
+            Assert.AreEqual("manual about page", await File.ReadAllTextAsync(about));
+            Assert.AreEqual("manual styles", await File.ReadAllTextAsync(css));
+            Assert.AreEqual($"report {i}", await File.ReadAllTextAsync(Path.Combine(published, "index.html")));
+        }
+        Assert.HasCount(5, Directory.GetFiles(published));
     }
 
     [TestMethod]
