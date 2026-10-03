@@ -87,7 +87,7 @@ public sealed class ProbeSafetyTests
         foreach (var stream in streams)
         {
             Assert.Contains("Host: good.dn42:8080", stream.Requests);
-            Assert.Contains("DN42Atlas/0.1 (+https://joyfulreaper.dn42/)", stream.Requests);
+            Assert.Contains("User-Agent: DN42Atlas/0.2 (+https://dn42atlas.dn42/)\r\n", stream.Requests);
         }
     }
 

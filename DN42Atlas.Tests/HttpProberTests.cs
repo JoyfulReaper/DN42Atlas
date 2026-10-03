@@ -125,7 +125,7 @@ public sealed class HttpProberTests
     private static HttpClient CreateClient(List<string> requests, Func<string, HttpResponseMessage> response) =>
         new(new FakeHandler(request =>
         {
-            Assert.Contains("DN42Atlas/0.1", request.Headers.UserAgent.ToString());
+            Assert.AreEqual("DN42Atlas/0.2 (+https://dn42atlas.dn42/)", request.Headers.UserAgent.ToString());
             var path = request.RequestUri!.AbsolutePath;
             requests.Add(path);
             return response(path);

@@ -122,9 +122,9 @@
 <h2>What is this?</h2>
 
 <p>
-    DN42Atlas periodically discovers publicly reachable services
+    DN42Atlas discovers publicly reachable services
     advertised on the DN42 network and builds a browsable directory
-    from the results.
+    from the results. Crawl results are not being published yet.
 </p>
 
 <p>
@@ -217,11 +217,11 @@
     HTTP requests from the crawler identify themselves using:
 </p>
 
-<pre>DN42Atlas/0.1 (+https://joyfulreaper.dn42/)</pre>
+<pre>DN42Atlas/0.2 (+https://dn42atlas.dn42/)</pre>
 
 <p>
-    This will eventually point directly to this page once
-    <code>dn42atlas.dn42</code> is deployed.
+    The scanner identity points to the Atlas home at
+    <a href="https://dn42atlas.dn42/">dn42atlas.dn42</a>.
 </p>
 
 </section>
@@ -287,9 +287,9 @@ Disallow: /</pre>
 </p>
 
 <p>
-    Complete exclusions will be maintained separately from
-    <code>robots.txt</code> so they can prevent future scheduled probes
-    as well as publication in Atlas results.
+    Complete exclusions are maintained separately from
+    <code>robots.txt</code> and prevent Atlas probing and inclusion
+    in its generated results.
 </p>
 
 <p>

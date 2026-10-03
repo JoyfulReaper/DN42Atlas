@@ -10,7 +10,7 @@ namespace DN42Atlas.Probing;
 public static class HttpProber
 {
     private const string UserAgent =
-        "DN42Atlas/0.1 (+https://joyfulreaper.dn42/)";
+        "DN42Atlas/0.2 (+https://dn42atlas.dn42/)";
 
     private const int MaxRobotsBytes = 64 * 1024;
     private const int MaxHomepageBytes = 256 * 1024;

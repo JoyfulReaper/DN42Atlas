@@ -53,7 +53,7 @@ For each potential HTTP/HTTPS origin it:
 The current scanner identifies itself as:
 
 ```text
-DN42Atlas/0.1 (+https://joyfulreaper.dn42/)
+DN42Atlas/0.2 (+https://dn42atlas.dn42/)
 ```
 
 If `robots.txt` cannot be evaluated safely, Atlas does not fetch the homepage.
