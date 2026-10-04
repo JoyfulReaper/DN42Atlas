@@ -22,6 +22,9 @@ public sealed class ManualRequestStore(string path)
             throw new InvalidOperationException("Manual request DB and published paths must be explicit absolute paths.");
         PublicationState.EnsureOutsidePublicRoot(path, published);
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (configuration["DN42ATLAS_PUBLICATION_STATE_PATH"] is string state &&
+            AtlasOperationLock.GetPath(state, published).Equals(Path.GetFullPath(path), comparison))
+            throw new InvalidOperationException("Manual request storage must not use the operation lock path.");
         if (configuration["DN42ATLAS_RUNTIME_EXCLUSIONS_PATH"] is string runtime &&
             Path.GetFullPath(runtime + ".reconciliation-pending").Equals(Path.GetFullPath(path), comparison))
             throw new InvalidOperationException("Manual request storage must not use the reconciliation fence path.");

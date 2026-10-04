@@ -110,6 +110,7 @@ public static class OperatorEndpoints
                 : await coordinator.IncludeAsync(identity!, resource.Type.ToString(), resource.Value, recordId!.Value, context.RequestAborted);
             if (status == MutationStatus.Success) return Results.Redirect("/operator?result=" + (operation == "exclude" ? "excluded" : "included"));
         }
+        if (status == MutationStatus.Busy) context.Response.Headers.RetryAfter = "30";
         var code = status switch
         {
             MutationStatus.InvalidRequest => StatusCodes.Status400BadRequest,

@@ -3,7 +3,8 @@
 This guide describes the code and the current Linux deployment model. The root
 [README](../README.md) is the quick overview; the [OptOut README](../DN42Atlas.OptOut/README.md)
 contains detailed configuration and recovery instructions. Deployment settings
-described here are not an nginx configuration or systemd unit supplied by this repository.
+described here are not an nginx configuration or OptOut systemd unit supplied by this repository.
+Opt-in crawler service/timer templates are provided under `deployment/systemd/`.
 
 ## Goals and non-goals
 
@@ -211,9 +212,30 @@ is not an atomic DB/filesystem transaction.
 
 `exclusions-reconcile` rebuilds from recorded active rows and republishes the exact
 state-selected scan without crawling; `exclusions-materialize` only rebuilds runtime.
-The mutation gate is process-local. Run one mutation process, maintenance with it
-stopped, and coordinate crawler publication and registry updates separately.
-Already-running crawlers that loaded old policy are not forcibly interrupted.
+The local mutation gate is supplemented by a cross-process operation lock at
+`<publication-state-path>.operation-lock`, outside the public root. Linux uses an
+explicitly checked exclusive nonblocking `flock`; Windows uses exclusive file
+sharing. The permanent file uses `0600` on Unix; ownership ends on descriptor
+disposal/process death. Do not unlink/replace it or alias paths.
+Publishing CLI commands `run`, `republish`, `publish-existing` acquire before
+loading policy and hold ownership for the whole operation. Final mutations,
+rollback, maintenance reconciliation and startup recovery participate; internal
+reconciliation receives the owned lease to avoid nested acquisition. Runtime
+initialization/materialization CLI also lock. Web mutations return 503/retry
+guidance after bounded local/OS waits without changes; CLI/startup wait longer.
+Use identical configured state/policy/public paths and one mutation web process.
+Standalone resolution/scanning/report/probe commands do not publish and do not lock.
+Registry updates remain separately coordinated; the publication lock does not
+replace the registry updater's own lock or make DB/filesystem updates transactional.
+
+Scheduled production `run` uses `DN42ATLAS_REGISTRY_PATH` as a checkout root,
+reading `data/dns`, matching registry-update and OptOut. Explicit resolver
+constructor paths override configuration; unset settings retain the developer
+home-directory fallback. `deployment/systemd/` supplies a oneshot source-checkout
+run at 01:30 local time daily, persistent with up to 15 minutes random delay, and
+a 45-minute maximum runtime. Its separate `crawler.env` contains only registry,
+runtime and publication-state paths. Templates are opt-in, not installed by code;
+nginx continues serving the preview root until the October 16 launch gate.
 
 ## Manual request architecture
 
@@ -300,10 +322,10 @@ databases/runtime/state files with owner read/write (`0600`) on Unix; existing
 permissions and Windows ACLs are not rewritten. Protect parent directories and
 ensure the intended crawler/service account can read policy/state.
 
-Core CLI still resolves from `~/dn42-registry/data/dns` and loads manual rules,
-`results/` and `published/` under its working directory. `DN42ATLAS_REGISTRY_PATH`
-controls registry update and OptOut authorization, not the default crawler resolver.
-Coordinate those checkouts explicitly. `DN42ATLAS_PUBLICATION_STATE_PATH` can
+Core CLI loads manual rules, `results/` and `published/` under its working directory.
+`DN42ATLAS_REGISTRY_PATH` is the checkout root shared by resolution, registry update
+and OptOut authorization; absent configuration retains `~/dn42-registry/data/dns`.
+`DN42ATLAS_PUBLICATION_STATE_PATH` can
 override the CLI's private `.dn42atlas/publication-state.json` default;
 OptOut requires an explicit state path. The web service's published-path setting
 does not change the crawler's working-directory published root.
@@ -385,13 +407,13 @@ Use the root README for full crawler syntax and the OptOut README for settings.
 ## Known limitations / future work
 
 - JSON/HTML/private state and SQLite/runtime reconciliation are not one transaction.
-- Mutation serialization and contact rate limiting are process-local.
+- Contact rate limiting is process-local; mutation/publication locking is cross-process.
 - Notifications have no durable queue/retry; SQLite is the review source of truth.
 - Self-service supports exact resources only; wildcard/broader cases require manual review.
-- Already-running crawlers are not stopped when policy changes; coordinate publication.
+- Full `run` defers mutations until completion; standalone scans need separate coordination.
 - Core CLI working-directory defaults differ from web explicit path configuration.
-- There is no pipeline-wide cancellation, scheduler, or automatic public launch gate.
-- Second-resolution scan filenames can collide under concurrent runs; use one pipeline.
+- There is no pipeline-wide cancellation or automatic public launch gate; scheduling uses opt-in systemd templates.
+- Second-resolution scan filenames can collide under concurrent standalone scans; full `run` serializes.
 - Public artifacts omit provenance and cannot replace immutable raw scans.
 - Release retention has no cross-process deployment lock; deploy one process at a time.
 - Service active-state verification is not an HTTP probe or automatic rollback.

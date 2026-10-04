@@ -27,6 +27,10 @@ try
     if (command == "registry-update")
         return await RegistryUpdateCommand.ExecuteAsync();
 
+    using var operation = command is "run" or "republish" or "publish-existing"
+        ? await AtlasOperationLock.AcquireAsync(PublicationState.ConfiguredPath,
+            Path.Combine(Environment.CurrentDirectory, "published"),
+            onContention: () => Console.Error.WriteLine("Waiting for Atlas operation lock.")) : null;
     var exclusionPolicy = ExclusionPolicy.Load(
         Path.Combine(Environment.CurrentDirectory, "config", "excluded-hosts.txt"),
         Path.Combine(Environment.CurrentDirectory, "config", "excluded-prefixes.txt"),

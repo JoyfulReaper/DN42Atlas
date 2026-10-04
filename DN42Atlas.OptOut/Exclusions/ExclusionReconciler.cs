@@ -1,5 +1,6 @@
 using DN42Atlas.Commands;
 using DN42Atlas.Policy;
+using DN42Atlas.Publishing;
 
 namespace DN42Atlas.OptOut.Exclusions;
 
@@ -9,8 +10,9 @@ public sealed class ExclusionReconciler(ExclusionStore store, MutationPaths path
     Func<CancellationToken, Task>? materialize = null,
     Func<ExclusionPolicy, CancellationToken, Task>? republish = null)
 {
-    public bool BeginRestrictiveMutation()
+    internal bool BeginRestrictiveMutation(AtlasOperationLock operation)
     {
+        operation.EnsureOwnership(paths.State, paths.Published);
         try { RestrictiveReconciliationFence.Establish(paths); }
         catch (Exception ex)
         {
@@ -24,15 +26,22 @@ public sealed class ExclusionReconciler(ExclusionStore store, MutationPaths path
 
     public async Task RecoverPendingAsync()
     {
+        using var operation = await AtlasOperationLock.AcquireAsync(paths.State, paths.Published);
         if (!RestrictiveReconciliationFence.IsPending(paths)) return;
         logger.LogWarning("Recovering unfinished restrictive reconciliation before startup.");
-        if (await ReconcileAsync() != ReconciliationStatus.Success)
+        if (await ReconcileUnderLockAsync(operation) != ReconciliationStatus.Success)
             throw new InvalidOperationException("Unfinished exclusion reconciliation could not be recovered. The listing was withdrawn where possible; startup refused.");
     }
 
     public async Task<ReconciliationStatus> ReconcileAsync()
     {
-        if (!BeginRestrictiveMutation()) return ReconciliationStatus.WithdrawalFailed;
+        using var operation = await AtlasOperationLock.AcquireAsync(paths.State, paths.Published);
+        return await ReconcileUnderLockAsync(operation);
+    }
+
+    internal async Task<ReconciliationStatus> ReconcileUnderLockAsync(AtlasOperationLock operation)
+    {
+        if (!BeginRestrictiveMutation(operation)) return ReconciliationStatus.WithdrawalFailed;
         ExclusionPolicy policy;
         var backup = paths.Runtime + $".{Guid.NewGuid():N}.backup";
         try

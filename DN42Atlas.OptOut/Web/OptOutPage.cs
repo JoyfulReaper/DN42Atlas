@@ -219,6 +219,7 @@ public static class OptOutPage
             MutationStatus.InvalidRequest => "Invalid resource request. No change was made.",
             MutationStatus.NotAuthorized => "The current registry does not authorize this exact resource, or is not fresh. No change was made.",
             MutationStatus.NotRecorded => "The operation was not completed. Please contact the operator.",
+            MutationStatus.Busy => "An Atlas crawl or publication is in progress. No change was made. Please retry shortly.",
             MutationStatus.RecordedRuntimeUnavailable => "Your exclusion has been recorded, but runtime policy reconciliation failed. Crawling and the public listing are unavailable pending reconciliation.",
             MutationStatus.RecordedPublicationWithdrawn => "Your exclusion has been recorded and future probing is blocked, but the public Atlas could not be regenerated and has been withdrawn pending reconciliation.",
             MutationStatus.WithdrawalFailed => "The operation failed and policy or public withdrawal could not be completed. Immediate operator intervention is required.",

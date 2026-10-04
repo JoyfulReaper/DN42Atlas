@@ -2,12 +2,13 @@ using DN42Atlas.OptOut.Auth;
 using DN42Atlas.OptOut.Registry;
 using DN42Atlas.Policy;
 using DN42Atlas.Commands;
+using DN42Atlas.Publishing;
 
 namespace DN42Atlas.OptOut.Exclusions;
 
 public enum MutationStatus { Success, InvalidRequest, NotAuthorized, NotRecorded, RecordedRuntimeUnavailable,
     RecordedPublicationWithdrawn, WithdrawalFailed, Uncertain, UncertainWithdrawalFailed,
-    Conflict, InclusionRestored, InclusionUnavailable }
+    Conflict, InclusionRestored, InclusionUnavailable, Busy }
 
 // Inclusion binds the active row; exclusion binds the latest historical generation (possibly absent).
 public sealed record ConfirmationPreparation(MutationStatus Status, ExactResource? Resource = null, long? RecordId = null);
@@ -26,6 +27,21 @@ public sealed class ExclusionMutationCoordinator(ExclusionStore store, RegistryR
     InclusionOperations? inclusionOperations = null) : IDisposable
 {
     private readonly SemaphoreSlim gate = new(1, 1);
+
+    private async Task<bool> TryEnterMutationAsync(CancellationToken cancellationToken)
+    {
+        if (await gate.WaitAsync(TimeSpan.FromSeconds(1), cancellationToken)) return true;
+        logger.LogInformation("Another Atlas mutation owns the local gate; mutation deferred without changes.");
+        return false;
+    }
+
+    private async Task<AtlasOperationLock?> TryAcquireOperationAsync(CancellationToken cancellationToken)
+    {
+        var operation = await AtlasOperationLock.TryAcquireAsync(paths.State, paths.Published,
+            TimeSpan.FromSeconds(1), cancellationToken);
+        if (operation == null) logger.LogInformation("Atlas publisher owns the operation lock; mutation deferred without changes.");
+        return operation;
+    }
 
     public static bool IsManuallyExcluded(ExclusionPolicy manual, ExactResource resource) =>
         resource.Type == ExclusionResourceType.Domain
@@ -71,9 +87,11 @@ public sealed class ExclusionMutationCoordinator(ExclusionStore store, RegistryR
         ExactResource resource;
         try { resource = ExactResource.Parse(type, value); }
         catch (Exception ex) when (ex is ArgumentException or FormatException) { return MutationStatus.InvalidRequest; }
-        await gate.WaitAsync(cancellationToken);
+        if (!await TryEnterMutationAsync(cancellationToken)) return MutationStatus.Busy;
         try
         {
+            using var operation = await TryAcquireOperationAsync(cancellationToken);
+            if (operation == null) return MutationStatus.Busy;
             ExclusionRecord? active;
             try
             {
@@ -123,7 +141,7 @@ public sealed class ExclusionMutationCoordinator(ExclusionStore store, RegistryR
                 {
                     // Reactivation is also restrictive: withdraw any candidate listing before
                     // restoring the audit row, and leave durable recovery evidence if interrupted.
-                    if (!reconciler.BeginRestrictiveMutation())
+                    if (!reconciler.BeginRestrictiveMutation(operation))
                         throw new InvalidOperationException("Cannot fence exclusion reactivation.");
                     File.Delete(paths.Runtime);
                     var row = await store.GetByIdAsync(active.Id);
@@ -134,7 +152,7 @@ public sealed class ExclusionMutationCoordinator(ExclusionStore store, RegistryR
                         throw new InvalidOperationException("Cannot prove exclusion reactivation.");
                     var restored = await store.GetByIdAsync(active.Id);
                     if (restored != active) throw new InvalidOperationException("Original exclusion was not restored.");
-                    if (await reconciler.ReconcileAsync() != ReconciliationStatus.Success)
+                    if (await reconciler.ReconcileUnderLockAsync(operation) != ReconciliationStatus.Success)
                         throw new InvalidOperationException("Exclusion recovery did not complete.");
                     DeletePrivate(backup);
                     return MutationStatus.InclusionRestored;
@@ -169,9 +187,11 @@ public sealed class ExclusionMutationCoordinator(ExclusionStore store, RegistryR
         try { resource = ExactResource.Parse(type, value); }
         catch (Exception ex) when (ex is ArgumentException or FormatException) { return MutationStatus.InvalidRequest; }
 
-        await gate.WaitAsync(cancellationToken);
+        if (!await TryEnterMutationAsync(cancellationToken)) return MutationStatus.Busy;
         try
         {
+            using var operation = await TryAcquireOperationAsync(cancellationToken);
+            if (operation == null) return MutationStatus.Busy;
             DN42Atlas.Registry.RegistrySnapshot? snapshot;
             IReadOnlyList<ExclusionRecord> before;
             bool alreadyActive;
@@ -193,7 +213,7 @@ public sealed class ExclusionMutationCoordinator(ExclusionStore store, RegistryR
 
             // Durable fence and static withdrawal precede SQLite, so process termination
             // cannot strand an old listing after a restrictive exclusion commits.
-            if (!reconciler.BeginRestrictiveMutation()) return MutationStatus.NotRecorded;
+            if (!reconciler.BeginRestrictiveMutation(operation)) return MutationStatus.NotRecorded;
             var backup = paths.Runtime + $".{Guid.NewGuid():N}.backup";
             try { if (File.Exists(paths.Runtime)) File.Move(paths.Runtime, backup); }
             catch (Exception ex)
@@ -223,7 +243,7 @@ public sealed class ExclusionMutationCoordinator(ExclusionStore store, RegistryR
                     {
                         if (File.Exists(backup) && !File.Exists(paths.Runtime)) File.Move(backup, paths.Runtime);
                         // Regenerate from authoritative unchanged records; never restore stale public backups.
-                        _ = await reconciler.ReconcileAsync();
+                        _ = await reconciler.ReconcileUnderLockAsync(operation);
                         return MutationStatus.NotRecorded;
                     }
                     if (after.Any(r => r.ResourceType == resource.Type && r.ResourceValue == resource.Value))
@@ -235,7 +255,7 @@ public sealed class ExclusionMutationCoordinator(ExclusionStore store, RegistryR
                 return reconciler.WithdrawPublic() ? MutationStatus.Uncertain : MutationStatus.UncertainWithdrawalFailed;
             }
 
-            var result = await reconciler.ReconcileAsync();
+            var result = await reconciler.ReconcileUnderLockAsync(operation);
             if (result is ReconciliationStatus.Success or ReconciliationStatus.PublicationWithdrawn)
             {
                 try { File.Delete(backup); }

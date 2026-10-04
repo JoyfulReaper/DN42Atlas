@@ -137,7 +137,7 @@ HTTP connections are pinned to the validated addresses while retaining the hostn
 
 The local registry checkout is needed for the default resolution command. Resolution and probing need access to DN42; `web-scan` reads saved DNS results instead of the registry. Generating a report from an existing JSON file does not need network access, but still requires both exclusion files at startup.
 
-The registry is currently expected at:
+When `DN42ATLAS_REGISTRY_PATH` is set, it names the checkout root (production uses `/var/lib/dn42atlas/registry`); resolution reads its `data/dns` directory. Without it, the developer fallback is:
 
 ```text
 ~/dn42-registry
@@ -225,7 +225,7 @@ The existing deployment binds OptOut to `127.0.0.1:5078`. nginx serves static co
 | `/var/lib/dn42atlas/publication-state.json` | Private exact raw-scan selection and SHA-256 |
 | `~/.config/dn42atlas/oidc.env` | Secret deployment configuration |
 
-Paths above describe the production layout conceptually; use the configured absolute paths for your deployment. Crawler commands still use working-directory defaults for `results/`, `published/`, and manual policy files. In particular, crawler resolution currently reads `~/dn42-registry/data/dns`; the configured registry path controls OptOut authorization and `registry-update`, not that default resolver path.
+Paths above describe the production layout conceptually; use the configured absolute paths for your deployment. Crawler commands use working-directory defaults for `results/`, `published/`, and manual policy files. Resolution reads `<DN42ATLAS_REGISTRY_PATH>/data/dns` when configured; the setting is the checkout root shared with OptOut authorization and `registry-update`. Explicit constructor overrides take priority in tests; without configuration the developer fallback remains `~/dn42-registry/data/dns`. Configured roots must be nonempty absolute paths.
 
 The preview source pages already link to `/operator` and `/contact`. Separately, the publisher preserves already-installed support pages; updating those derived copies is an operator decision. Do not switch nginx to generated listings before the no-earlier-than **October 16, 2026** launch gate. Deployment does not make that switch or schedule crawls.
 
@@ -306,7 +306,17 @@ Generated files are staged in `published/`, flushed and closed, then individuall
 
 The command stops and returns nonzero if a stage fails. Standalone `web-scan` and `report` keep their existing outputs and do not update `published/`. Crawler commands do not configure a web server, deploy OptOut, or schedule work. Temporary staging filenames begin with a dot and end in `.tmp`; servers should not expose these files.
 
-For unattended execution, set the working directory explicitly: exclusion files, relative input paths, `domain-resolution.json`, `results/`, and `published/` depend on it. The registry is read from `~/dn42-registry/data/dns` for the account running Atlas. Commands currently have no pipeline-wide cancellation support. Resolution output overwrites its fixed filename; scan filenames use local start time to the second, so concurrent runs can collide. Run one pipeline at a time. Historical artifact writes are unchanged; only the stable published files use atomic replacement.
+For unattended execution, set the working directory explicitly: exclusion files, relative input paths, `domain-resolution.json`, `results/`, and `published/` depend on it. Set `DN42ATLAS_REGISTRY_PATH` to the dedicated checkout root; unset configuration retains the developer home-directory fallback. Commands currently have no pipeline-wide cancellation support. Resolution output overwrites its fixed filename; standalone scan filenames use local start time to the second, so coordinate standalone scans separately. Historical artifact writes are unchanged; only stable published files use atomic replacement.
+
+### Operation lock and daily crawler
+
+`run`, `republish`, and `publish-existing` acquire a shared cross-process operation lock **before loading exclusion policy** and hold it through the entire operation. OptOut exclusion/inclusion mutations, their rollback recovery, `exclusions-reconcile`, and pending-reconciliation startup recovery use the same lock. Runtime initialization/materialization CLI commands also participate. Standalone `resolve`, `web-scan`, `report`, `probe-test`, and help do not take it because they do not change stable public/runtime state.
+
+The permanent private lock file is `<publication-state-path>.operation-lock`: production normally `/var/lib/dn42atlas/publication-state.json.operation-lock`; the CLI developer default is `.dn42atlas/publication-state.json.operation-lock` under its working directory. Both applications must configure the same absolute `DN42ATLAS_PUBLICATION_STATE_PATH`, the same manual/runtime policies, and the same published directory. No new lock setting is needed. Linux uses nonblocking exclusive `flock(LOCK_EX | LOCK_NB)` on an open descriptor, explicitly checked for errors; Windows uses `FileShare.None` sharing enforcement. Disposal or process death releases ownership; file existence is never ownership. New Unix files use `0600`. Use a protected local filesystem directory and never delete/rename the lock file or use path aliases while processes may run. Unsupported OS/filesystem locking fails closed. The Linux explicit check also avoids relying on .NET's best-effort sharing locks.
+
+Publishing CLI, maintenance and startup recovery wait for ownership (lock acquisition is cancellable internally). Web final mutations wait at most one second for each local/OS gate, returning HTTP 503 with `Retry-After: 30` and retry guidance if busy, with no DB/runtime/public changes. A 10–15 minute crawl therefore temporarily defers self-service mutations instead of holding their HTTP requests. Existing served listing remains as it was until a mutation actually obtains ownership.
+
+The [crawler deployment guide](deployment/systemd/README.md) includes opt-in systemd templates for a daily 01:30 local-time run with up to 15 minutes randomized delay and persistent missed-run handling. They use the source checkout, a separate minimal `crawler.env`, and a 45-minute service limit including build/lock waiting. Templates are not installed automatically. They refresh hidden `/opt/DN42Atlas/published` artifacts while nginx continues serving `/opt/DN42Atlas/DN42Atlas/site`; the no-earlier-than **October 16, 2026** launch gate is unchanged. No unit modifies nginx or switches the preview root.
 
 ### Registry / DNS Scan
 

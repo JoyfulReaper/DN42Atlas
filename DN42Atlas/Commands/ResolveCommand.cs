@@ -6,16 +6,26 @@ namespace DN42Atlas.Commands;
 
 public sealed class ResolveCommand(RegistryResolver resolver, string? registryDirectory = null)
 {
+    public static string GetRegistryDirectory(string? explicitDirectory = null)
+    {
+        if (explicitDirectory != null)
+        {
+            if (string.IsNullOrWhiteSpace(explicitDirectory)) throw new ArgumentException("Registry directory cannot be empty.");
+            return explicitDirectory;
+        }
+        var root = Environment.GetEnvironmentVariable("DN42ATLAS_REGISTRY_PATH");
+        if (root != null)
+        {
+            if (string.IsNullOrWhiteSpace(root) || !Path.IsPathFullyQualified(root))
+                throw new InvalidOperationException("DN42ATLAS_REGISTRY_PATH must be an absolute registry checkout root.");
+            return Path.Combine(Path.GetFullPath(root), "data", "dns");
+        }
+        return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "dn42-registry", "data", "dns");
+    }
+
     public async Task<string> ExecuteAsync()
     {
-        var registryPath =
-            registryDirectory ?? Path.Combine(
-                Environment.GetFolderPath(
-                    Environment.SpecialFolder
-                        .UserProfile),
-                "dn42-registry",
-                "data",
-                "dns");
+        var registryPath = GetRegistryDirectory(registryDirectory);
 
         var scan = await resolver.ResolveAsync(registryPath);
         var resolutions = scan.Resolutions;

@@ -6,6 +6,7 @@ using DN42Atlas.OptOut.ManualRequests;
 using JoyfulReaperLib.Ntfy;
 using DN42Atlas.Policy;
 using DN42Atlas.Registry;
+using DN42Atlas.Publishing;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
@@ -47,6 +48,13 @@ if (maintenanceCommand is "exclusions-init" or "exclusions-materialize" or "excl
         var runtimeBundlePath = RequiredSetting(
             builder.Configuration,
             "DN42ATLAS_RUNTIME_EXCLUSIONS_PATH");
+
+        // Initialization/materialization also write runtime state; reconciliation owns its own lock.
+        using var operation = maintenanceCommand is "exclusions-init" or "exclusions-materialize"
+            ? await AtlasOperationLock.AcquireAsync(
+                builder.Configuration["DN42ATLAS_PUBLICATION_STATE_PATH"] ?? PublicationState.ConfiguredPath,
+                builder.Configuration["DN42ATLAS_PUBLISHED_PATH"] ?? Path.Combine(Environment.CurrentDirectory, "published"))
+            : null;
 
         if (maintenanceCommand == "exclusions-init")
         {
