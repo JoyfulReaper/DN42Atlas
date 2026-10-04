@@ -4,13 +4,14 @@ namespace DN42Atlas.Tests;
 
 internal sealed class TestFiles : IDisposable
 {
-    public string DirectoryPath { get; } = Path.Combine(Path.GetTempPath(), "DN42Atlas-tests", Guid.NewGuid().ToString("N"));
+    public string DirectoryPath { get; }
     public string HostsPath => Path.Combine(DirectoryPath, "excluded-hosts.txt");
     public string PrefixesPath => Path.Combine(DirectoryPath, "excluded-prefixes.txt");
     public string RuntimePath => Path.Combine(DirectoryPath, "runtime-exclusions.json");
 
-    public TestFiles(string hosts = "", string prefixes = "")
+    public TestFiles(string hosts = "", string prefixes = "", string? directoryPath = null)
     {
+        DirectoryPath = directoryPath ?? Path.Combine(Path.GetTempPath(), "DN42Atlas-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(DirectoryPath);
         File.WriteAllText(HostsPath, hosts);
         File.WriteAllText(PrefixesPath, prefixes);

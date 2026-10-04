@@ -121,6 +121,10 @@ public sealed class ExclusionMutationCoordinator(ExclusionStore store, RegistryR
                 logger.LogError(ex, "Inclusion failed; recovering the original exclusion.");
                 try
                 {
+                    // Reactivation is also restrictive: withdraw any candidate listing before
+                    // restoring the audit row, and leave durable recovery evidence if interrupted.
+                    if (!reconciler.BeginRestrictiveMutation())
+                        throw new InvalidOperationException("Cannot fence exclusion reactivation.");
                     File.Delete(paths.Runtime);
                     var row = await store.GetByIdAsync(active.Id);
                     if (row == null) throw new InvalidOperationException("Original exclusion is unavailable.");
@@ -187,6 +191,9 @@ public sealed class ExclusionMutationCoordinator(ExclusionStore store, RegistryR
                 return MutationStatus.NotRecorded;
             }
 
+            // Durable fence and static withdrawal precede SQLite, so process termination
+            // cannot strand an old listing after a restrictive exclusion commits.
+            if (!reconciler.BeginRestrictiveMutation()) return MutationStatus.NotRecorded;
             var backup = paths.Runtime + $".{Guid.NewGuid():N}.backup";
             try { if (File.Exists(paths.Runtime)) File.Move(paths.Runtime, backup); }
             catch (Exception ex)
@@ -215,6 +222,8 @@ public sealed class ExclusionMutationCoordinator(ExclusionStore store, RegistryR
                     if (before.Select(r => r.Id).SequenceEqual(after.Select(r => r.Id)))
                     {
                         if (File.Exists(backup) && !File.Exists(paths.Runtime)) File.Move(backup, paths.Runtime);
+                        // Regenerate from authoritative unchanged records; never restore stale public backups.
+                        _ = await reconciler.ReconcileAsync();
                         return MutationStatus.NotRecorded;
                     }
                     if (after.Any(r => r.ResourceType == resource.Type && r.ResourceValue == resource.Value))

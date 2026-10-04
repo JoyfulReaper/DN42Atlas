@@ -9,8 +9,30 @@ public sealed class ExclusionReconciler(ExclusionStore store, MutationPaths path
     Func<CancellationToken, Task>? materialize = null,
     Func<ExclusionPolicy, CancellationToken, Task>? republish = null)
 {
+    public bool BeginRestrictiveMutation()
+    {
+        try { RestrictiveReconciliationFence.Establish(paths); }
+        catch (Exception ex)
+        {
+            logger.LogCritical(ex, "Cannot durably fence restrictive reconciliation.");
+            _ = WithdrawPublic();
+            return false;
+        }
+        // nginx serves these files independently of this process. Remove both before any commit.
+        return WithdrawPublic();
+    }
+
+    public async Task RecoverPendingAsync()
+    {
+        if (!RestrictiveReconciliationFence.IsPending(paths)) return;
+        logger.LogWarning("Recovering unfinished restrictive reconciliation before startup.");
+        if (await ReconcileAsync() != ReconciliationStatus.Success)
+            throw new InvalidOperationException("Unfinished exclusion reconciliation could not be recovered. The listing was withdrawn where possible; startup refused.");
+    }
+
     public async Task<ReconciliationStatus> ReconcileAsync()
     {
+        if (!BeginRestrictiveMutation()) return ReconciliationStatus.WithdrawalFailed;
         ExclusionPolicy policy;
         var backup = paths.Runtime + $".{Guid.NewGuid():N}.backup";
         try
@@ -37,6 +59,7 @@ public sealed class ExclusionReconciler(ExclusionStore store, MutationPaths path
             policy = ExclusionPolicy.Load(paths.Hosts, paths.Prefixes, paths.Runtime);
             if (republish != null) await republish(policy, CancellationToken.None);
             else await new RepublishCommand(policy, paths.Published, paths.State).ExecuteAsync();
+            File.Delete(paths.Pending);
             return ReconciliationStatus.Success;
         }
         catch (Exception ex)

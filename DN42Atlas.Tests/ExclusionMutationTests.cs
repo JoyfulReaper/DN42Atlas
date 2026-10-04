@@ -52,6 +52,13 @@ public sealed class ExclusionMutationTests
         Assert.ThrowsExactly<InvalidDataException>(() => Read());
         config["DN42ATLAS_PUBLICATION_STATE_PATH"] = files.RuntimePath;
         Assert.ThrowsExactly<InvalidOperationException>(() => Read());
+        config["DN42ATLAS_PUBLICATION_STATE_PATH"] = files.RuntimePath + ".reconciliation-pending";
+        Assert.ThrowsExactly<InvalidOperationException>(() => Read());
+        config["DN42ATLAS_PUBLICATION_STATE_PATH"] = Path.Combine(files.DirectoryPath, "state.json");
+        config["DN42ATLAS_MANUAL_REQUEST_DB_PATH"] = files.RuntimePath + ".reconciliation-pending";
+        Assert.ThrowsExactly<InvalidOperationException>(() => Read());
+        Assert.ThrowsExactly<InvalidOperationException>(() => DN42Atlas.OptOut.ManualRequests.ManualRequestStore.ConfiguredPath(
+            new ConfigurationBuilder().AddInMemoryCollection(config).Build()));
     }
 
     [TestMethod]
@@ -510,7 +517,8 @@ public sealed class ExclusionMutationTests
 
 internal sealed class MutationFixture : IDisposable
 {
-    public TestFiles Files { get; } = new();
+    public TestFiles Files { get; }
+    private MutationFixture(TestFiles? files) { Files = files ?? new(); }
     public Auth42Identity Identity { get; } = new("operator-subject", "OWNER-MNT", 4242420425);
     public MutationPaths Paths { get; private set; } = null!;
     public string DbPath => Path.Combine(Files.DirectoryPath, "audit.db");
@@ -526,9 +534,9 @@ internal sealed class MutationFixture : IDisposable
     public IAntiforgery Antiforgery => Services.GetRequiredService<IAntiforgery>();
     public ILoggerFactory Logs => Services.GetRequiredService<ILoggerFactory>();
 
-    public static async Task<MutationFixture> CreateAsync()
+    public static async Task<MutationFixture> CreateAsync(TestFiles? files = null)
     {
-        var f = new MutationFixture();
+        var f = new MutationFixture(files);
         f.Paths = new(f.Files.HostsPath, f.Files.PrefixesPath, f.Files.RuntimePath,
             Path.Combine(f.Files.DirectoryPath, "published"), Path.Combine(f.Files.DirectoryPath, "state.json"));
         await ExclusionMaintenance.InitializeAsync(f.DbPath, f.Paths.Runtime);

@@ -22,6 +22,9 @@ public sealed class ManualRequestStore(string path)
             throw new InvalidOperationException("Manual request DB and published paths must be explicit absolute paths.");
         PublicationState.EnsureOutsidePublicRoot(path, published);
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (configuration["DN42ATLAS_RUNTIME_EXCLUSIONS_PATH"] is string runtime &&
+            Path.GetFullPath(runtime + ".reconciliation-pending").Equals(Path.GetFullPath(path), comparison))
+            throw new InvalidOperationException("Manual request storage must not use the reconciliation fence path.");
         foreach (var key in new[] { "DN42ATLAS_EXCLUSION_DB_PATH", "DN42ATLAS_RUNTIME_EXCLUSIONS_PATH",
             "DN42ATLAS_PUBLICATION_STATE_PATH", "DN42ATLAS_EXCLUDED_HOSTS_PATH", "DN42ATLAS_EXCLUDED_PREFIXES_PATH" })
             if (configuration[key] is string other && Path.GetFullPath(other).Equals(Path.GetFullPath(path), comparison))

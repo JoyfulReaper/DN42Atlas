@@ -12,10 +12,10 @@ public sealed class PublicScanPolicy(ExclusionPolicy exclusions)
 
     public void Apply(JsonNode scan)
     {
+        var removedPrefixHosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (scan is JsonObject root && root["Results"] is JsonArray results)
         {
             var removedHosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var removedPrefixHosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             for (var index = results.Count - 1; index >= 0; index--)
             {
                 if (results[index] is JsonObject result &&
@@ -45,7 +45,7 @@ public sealed class PublicScanPolicy(ExclusionPolicy exclusions)
                 {
                     results.RemoveAt(index);
                     if (candidate["Domain"] is JsonValue name && name.TryGetValue<string>(out var hostname))
-                        removedPrefixHosts.Add(hostname);
+                        removedPrefixHosts.Add(ExclusionPolicy.NormalizeHostname(hostname));
                 }
             }
             if (removedHosts.Count > 0 && root["ExcludedByHostname"] is JsonValue count && count.TryGetValue<int>(out var previous))
@@ -56,10 +56,10 @@ public sealed class PublicScanPolicy(ExclusionPolicy exclusions)
             foreach (var result in results.OfType<JsonObject>())
                 result.Remove("ProbeAddresses");
         }
-        Filter(scan);
+        Filter(scan, removedPrefixHosts);
     }
 
-    private void Filter(JsonNode node)
+    private void Filter(JsonNode node, HashSet<string> removedPrefixHosts)
     {
         if (node is JsonObject obj)
         {
@@ -70,14 +70,14 @@ public sealed class PublicScanPolicy(ExclusionPolicy exclusions)
                     for (var index = references.Count - 1; index >= 0; index--)
                     {
                         if (references[index] is JsonValue value && value.TryGetValue<string>(out var text) &&
-                            (Redact(text) != text || (key == "DiscoveredLinks" && !IsSafeLink(text))))
+                            (Redact(text, removedPrefixHosts) != text || (key == "DiscoveredLinks" && !IsSafeLink(text, removedPrefixHosts))))
                             references.RemoveAt(index);
                     }
                 }
                 if (obj[key] is JsonValue scalar && scalar.TryGetValue<string>(out var original))
-                    obj[key] = Redact(original);
+                    obj[key] = Redact(original, removedPrefixHosts);
                 else if (obj[key] is JsonNode child)
-                    Filter(child);
+                    Filter(child, removedPrefixHosts);
             }
         }
         else if (node is JsonArray array)
@@ -85,26 +85,29 @@ public sealed class PublicScanPolicy(ExclusionPolicy exclusions)
             for (var index = 0; index < array.Count; index++)
             {
                 if (array[index] is JsonValue scalar && scalar.TryGetValue<string>(out var text))
-                    array[index] = Redact(text);
+                    array[index] = Redact(text, removedPrefixHosts);
                 else if (array[index] is JsonNode child)
-                    Filter(child);
+                    Filter(child, removedPrefixHosts);
             }
         }
     }
 
-    private string Redact(string text)
+    private bool IsHostExcluded(string hostname, HashSet<string> removedPrefixHosts) =>
+        exclusions.IsHostExcluded(hostname) || removedPrefixHosts.Contains(ExclusionPolicy.NormalizeHostname(hostname));
+
+    private string Redact(string text, HashSet<string> removedPrefixHosts)
     {
         foreach (var rule in exclusions.HostRules.Where(rule => rule.StartsWith("*.", StringComparison.Ordinal)).Concat(exclusions.PrefixRules))
             text = text.Replace(rule, "[excluded]", StringComparison.OrdinalIgnoreCase);
 
         return References.Replace(text, match =>
-            exclusions.IsHostExcluded(match.Value) || exclusions.IsAddressExcluded(match.Value.TrimEnd('.'))
+            IsHostExcluded(match.Value, removedPrefixHosts) || exclusions.IsAddressExcluded(match.Value.TrimEnd('.'))
                 ? "[excluded]" : match.Value);
     }
 
-    private bool IsSafeLink(string value) =>
+    private bool IsSafeLink(string value, HashSet<string> removedPrefixHosts) =>
         Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
         (uri.Scheme is "http" or "https" or "gopher" or "gemini") &&
-        !exclusions.IsHostExcluded(uri.IdnHost) &&
+        !IsHostExcluded(uri.IdnHost, removedPrefixHosts) &&
         !exclusions.IsAddressExcluded(uri.Host.Trim('[', ']'));
 }

@@ -113,6 +113,9 @@ var registryIpv4Path = Path.Combine(registryPath, "data", "inetnum");
 var registryIpv6Path = Path.Combine(registryPath, "data", "inet6num");
 var exclusionStore = new ExclusionStore(exclusionDatabasePath);
 var mutationPaths = MutationPaths.FromConfiguration(builder.Configuration);
+using (var recoveryLogs = LoggerFactory.Create(options => options.AddConsole()))
+    await new ExclusionReconciler(exclusionStore, mutationPaths,
+        recoveryLogs.CreateLogger<ExclusionReconciler>()).RecoverPendingAsync();
 exclusionStore.ValidateExisting();
 var manualRequestStore = new ManualRequestStore(ManualRequestStore.ConfiguredPath(builder.Configuration));
 manualRequestStore.ValidateExisting();

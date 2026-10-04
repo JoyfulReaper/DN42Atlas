@@ -12,6 +12,57 @@ namespace DN42Atlas.Tests;
 public sealed class PrefixPublicationTests
 {
     [TestMethod]
+    [DataRow("172.20.1.0/24", "172.20.1.1", "blocked.dn42")]
+    [DataRow("fd42:1234::/48", "fd42:1234::1", " BLOCKED.DN42. ")]
+    public async Task PrefixRemovedHostReferencesAreFilteredFromBothPublicModels(string prefix, string address, string domain)
+    {
+        using var files = new TestFiles();
+        var scan = new JsonObject
+        {
+            ["GeneratedAt"] = "2026-10-03T12:50:26Z", ["ExcludedByHostname"] = 0, ["ExcludedByPrefix"] = 0,
+            ["SkippedExternalOrMixedDomains"] = new JsonArray("BLOCKED.DN42.", "unrelated.dn42"),
+            ["Results"] = new JsonArray(
+                new JsonObject { ["Domain"] = domain, ["ProbeAddresses"] = new JsonArray(address) },
+                new JsonObject
+                {
+                    ["Domain"] = "safe.dn42", ["Scheme"] = "http", ["Port"] = 80,
+                    ["ProbeAddresses"] = new JsonArray("fd42:5678::1"),
+                    ["Title"] = "See BLOCKED.DN42. and safe.dn42",
+                    ["Error"] = "http://blocked.dn42/path failed",
+                    ["DiscoveredLinks"] = new JsonArray("http://blocked.dn42/", "https://BLOCKED.DN42./path", "http://safe.dn42/", "http://child.blocked.dn42/"),
+                    ["Dn42Mentions"] = new JsonArray(" blocked.dn42. ", "safe.dn42", "child.blocked.dn42")
+                })
+        };
+        var raw = files.Write("scan.json", scan.ToJsonString());
+        var original = File.ReadAllBytes(raw);
+        Assert.Contains("ProbeAddresses", Encoding.UTF8.GetString(original));
+        var published = Path.Combine(files.DirectoryPath, "published");
+        var state = Path.Combine(files.DirectoryPath, "state.json");
+        await ArtifactPublisher.PublishAsync(raw, published, files.LoadPolicy(), state);
+        File.WriteAllText(files.PrefixesPath, prefix);
+        await new RepublishCommand(files.LoadPolicy(), published, state).ExecuteAsync();
+        var json = File.ReadAllText(Path.Combine(published, "latest.json"));
+        var html = File.ReadAllText(Path.Combine(published, "index.html"));
+        var model = JsonNode.Parse(json)!;
+        Assert.HasCount(1, model["Results"]!.AsArray());
+        var safe = model["Results"]![0]!;
+        Assert.AreEqual("safe.dn42", safe["Domain"]!.GetValue<string>());
+        Assert.AreEqual("See [excluded] and safe.dn42", safe["Title"]!.GetValue<string>());
+        Assert.AreEqual("http://[excluded]/path failed", safe["Error"]!.GetValue<string>());
+        CollectionAssert.AreEqual(new[] { "http://safe.dn42/", "http://child.blocked.dn42/" },
+            safe["DiscoveredLinks"]!.AsArray().Select(n => n!.GetValue<string>()).ToArray());
+        CollectionAssert.AreEqual(new[] { "safe.dn42", "child.blocked.dn42" },
+            safe["Dn42Mentions"]!.AsArray().Select(n => n!.GetValue<string>()).ToArray());
+        CollectionAssert.AreEqual(new[] { "unrelated.dn42" },
+            model["SkippedExternalOrMixedDomains"]!.AsArray().Select(n => n!.GetValue<string>()).ToArray());
+        Assert.AreEqual(1, model["ExcludedByPrefix"]!.GetValue<int>());
+        Assert.DoesNotContain("ProbeAddresses", json);
+        Assert.DoesNotContain("ProbeAddresses", html);
+        Assert.IsTrue(JsonNode.DeepEquals(model, Embedded(html)));
+        CollectionAssert.AreEqual(original, File.ReadAllBytes(raw));
+    }
+
+    [TestMethod]
     [DataRow("172.20.220.48/28", "172.20.220.49", true)]
     [DataRow("172.20.0.0/16", "172.20.220.49", true)]
     [DataRow("fdf0:e12c:5528::/48", "fdf0:e12c:5528::123", true)]

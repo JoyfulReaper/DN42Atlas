@@ -104,6 +104,9 @@ including for failed probes. It is not evidence of which one address connected.
 A hostname exclusion or any excluded recorded destination removes the whole result.
 References are filtered/redacted; public exclusion information contains counts,
 not the matched rules. After row decisions, retained `ProbeAddresses` is removed.
+Hostnames removed by recorded prefix matches also become known-excluded exact
+hostnames for secondary metadata filtering, using the same case/trailing-dot
+normalization as hostname policy. This uses raw evidence without DNS lookups.
 `published/latest.json` and the self-contained `published/index.html` serialize the
 same filtered model with safe encoding. Raw bytes and original scan time do not change.
 
@@ -175,6 +178,8 @@ sequenceDiagram
   Web-->>Operator: Protected confirmation; no mutation
   Operator->>Web: Final exclusion with protected token
   Web->>Registry: Repeat checks under mutation gate
+  Web->>Web: Flush private pending fence
+  Web->>Publisher: Withdraw both stable listing files before DB commit
   Web->>Policy: Move old runtime aside (crawler fence)
   Web->>DB: Record active exclusion
   Web->>Policy: Materialize and validate all active records
@@ -184,6 +189,14 @@ sequenceDiagram
 
 Exclusion removes current published data and blocks future probing. Runtime is
 moved aside before critical writes so newly started crawlers fail closed.
+Before a restrictive commit, a private fence at
+`<DN42ATLAS_RUNTIME_EXCLUSIONS_PATH>.reconciliation-pending` is flushed and both
+stable listing files are removed. Failure to fence/withdraw prevents the commit.
+The fence remains through materialization and publication, and is removed only
+after successful full reconciliation. Web startup detects it before runtime
+validation, withdraws any listing, and reconciles SQLite's authoritative state;
+failed recovery refuses startup. The reserved fence path must remain private and
+writable, separate from raw scans and other state. No schema/config migration is needed.
 If reconciliation fails, recorded exclusions remain effective/authoritative and
 the listing is withdrawn where possible. Never reinstall an old policy backup
 over newly recorded audit state.

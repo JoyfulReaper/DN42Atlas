@@ -277,7 +277,7 @@ public sealed class ExclusionPolicy
     }
 
 
-    private static string NormalizeHostname(
+    internal static string NormalizeHostname(
         string hostname)
     {
         return hostname
