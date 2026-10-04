@@ -1,4 +1,5 @@
 using DN42Atlas.Registry;
+using DN42Atlas.Policy;
 
 namespace DN42Atlas.OptOut.Registry;
 
@@ -38,7 +39,8 @@ public sealed class RegistryDomainCatalog(string domainDirectory)
                 continue;
             }
 
-            domains.Add(domain.Domain);
+            try { domains.Add(ExclusionResourceNormalizer.NormalizeDomain(domain.Domain)); }
+            catch (Exception ex) when (ex is ArgumentException or FormatException) { }
         }
 
         return domains

@@ -31,6 +31,8 @@ public sealed class ExclusionStore(string databasePath)
 
         try
         {
+            // Create the empty database privately before SQLite opens it (including on Unix).
+            using (DN42Atlas.IO.PrivateFile.CreateNew(temporaryPath)) { }
             await using (var connection = CreateConnection(
                 temporaryPath,
                 SqliteOpenMode.ReadWriteCreate))

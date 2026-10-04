@@ -47,7 +47,7 @@ public static class ArtifactPublisher
             await StageTextAsync(artifacts.Json, stagedJson, cancellationToken);
             await StageTextAsync(artifacts.Html, stagedHtml, cancellationToken);
             var state = new PublicationState(1, scanPath, DateTimeOffset.UtcNow, hash);
-            await StageTextAsync(JsonSerializer.Serialize(state, PublicationState.JsonOptions), stagedState, cancellationToken);
+            await StageTextAsync(JsonSerializer.Serialize(state, PublicationState.JsonOptions), stagedState, cancellationToken, isPrivate: true);
 
             foreach (var file in staticFiles)
             {
@@ -85,16 +85,17 @@ public static class ArtifactPublisher
         }
     }
 
-    private static async Task StageTextAsync(string text, string destinationPath, CancellationToken cancellationToken)
+    private static async Task StageTextAsync(string text, string destinationPath, CancellationToken cancellationToken, bool isPrivate = false)
     {
         using var source = new MemoryStream(Encoding.UTF8.GetBytes(text));
-        await StageAsync(source, destinationPath, cancellationToken);
+        await StageAsync(source, destinationPath, cancellationToken, isPrivate);
     }
 
-    private static async Task StageAsync(Stream source, string destinationPath, CancellationToken cancellationToken)
+    private static async Task StageAsync(Stream source, string destinationPath, CancellationToken cancellationToken, bool isPrivate = false)
     {
-        await using var destination = new FileStream(destinationPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
-            bufferSize: 81920, useAsync: true);
+        await using var destination = isPrivate ? DN42Atlas.IO.PrivateFile.CreateNew(destinationPath)
+            : new FileStream(destinationPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                bufferSize: 81920, useAsync: true);
         await source.CopyToAsync(destination, cancellationToken);
         await destination.FlushAsync(cancellationToken);
         destination.Flush(flushToDisk: true);

@@ -41,8 +41,8 @@ public sealed class OptOutPageTests
             FreshSnapshot());
 
         Assert.Contains("Registry snapshot", html);
-        Assert.Contains("abcdef123456", html);
-        Assert.Contains("2026-10-03 18:00 UTC", html);
+        Assert.DoesNotContain("abcdef123456", html);
+        Assert.DoesNotContain("2026-10-03 18:00 UTC", html);
         Assert.Contains("2h 14m", html);
         Assert.Contains("Fresh", html);
         Assert.DoesNotContain("Automatic opt-out approval is disabled", html);

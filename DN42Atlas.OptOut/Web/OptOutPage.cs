@@ -1,8 +1,9 @@
-using System.Globalization;
 using System.Text;
 using System.Text.Encodings.Web;
 using DN42Atlas.OptOut.Auth;
 using DN42Atlas.Registry;
+using DN42Atlas.OptOut.Registry;
+using DN42Atlas.OptOut.Exclusions;
 
 namespace DN42Atlas.OptOut.Web;
 
@@ -25,7 +26,10 @@ public static class OptOutPage
         IReadOnlyList<string> ipv4Prefixes,
         IReadOnlyList<string> ipv6Prefixes,
         RegistrySnapshot snapshot,
-        bool ownershipAvailable = true)
+        bool ownershipAvailable = true,
+        IReadOnlySet<ExactResource>? excluded = null,
+        string? requestToken = null,
+        string? result = null)
     {
         var encoder = HtmlEncoder.Default;
         var content = new StringBuilder();
@@ -38,6 +42,7 @@ public static class OptOutPage
         content.Append("</p>");
 
         AppendRegistryStatus(content, encoder, snapshot);
+        if (result == "excluded") content.Append("<p>Exclusion recorded and public Atlas regenerated.</p>");
 
         if (!ownershipAvailable)
         {
@@ -51,24 +56,29 @@ public static class OptOutPage
                 content,
                 encoder,
                 domains,
-                "No matching registered .dn42 domains were found.");
+                "No matching registered .dn42 domains were found.", ExclusionResourceType.Domain, excluded,
+                snapshot.IsSafeForAutomaticApproval, requestToken);
 
             content.Append("<h2>IPv4 prefixes you can manage</h2>");
             AppendList(
                 content,
                 encoder,
                 ipv4Prefixes,
-                "No matching IPv4 allocations were found.");
+                "No matching IPv4 allocations were found.", ExclusionResourceType.IPv4Prefix, excluded,
+                snapshot.IsSafeForAutomaticApproval, requestToken);
 
             content.Append("<h2>IPv6 prefixes you can manage</h2>");
             AppendList(
                 content,
                 encoder,
                 ipv6Prefixes,
-                "No matching IPv6 allocations were found.");
+                "No matching IPv6 allocations were found.", ExclusionResourceType.IPv6Prefix, excluded,
+                snapshot.IsSafeForAutomaticApproval, requestToken);
         }
 
-        content.Append("<p>This first release is read-only. Exclusion controls are not available yet.</p>");
+        content.Append("<p>Excluding a domain prevents future probes for that hostname and removes it from the currently published Atlas without another crawl.</p>");
+        content.Append("<p>Excluding a prefix prevents future probes to addresses in that allocation and removes or redacts matching address references from the current publication.</p>");
+        content.Append("<p>Self-service exclusions cover exact registered resources only. Wildcards and broader or narrower allocations are not supported.</p>");
         content.Append("<p><a href=\"/logout\">Logout</a></p>");
 
         return Layout(
@@ -82,23 +92,6 @@ public static class OptOutPage
         RegistrySnapshot snapshot)
     {
         content.Append("<h2>Registry snapshot</h2><dl>");
-        AppendStatusValue(
-            content,
-            encoder,
-            "Commit",
-            snapshot.CommitSha is null
-                ? "Unavailable"
-                : snapshot.CommitSha[..Math.Min(12, snapshot.CommitSha.Length)]);
-        AppendStatusValue(
-            content,
-            encoder,
-            "Commit timestamp",
-            FormatTimestamp(snapshot.CommitTimestamp));
-        AppendStatusValue(
-            content,
-            encoder,
-            "Updated",
-            FormatTimestamp(snapshot.ObservedAt));
         AppendStatusValue(
             content,
             encoder,
@@ -144,12 +137,6 @@ public static class OptOutPage
         content.Append("</dd>");
     }
 
-    private static string FormatTimestamp(DateTimeOffset? value) =>
-        value?.ToUniversalTime().ToString(
-            "yyyy-MM-dd HH:mm 'UTC'",
-            CultureInfo.InvariantCulture) ??
-        "Unavailable";
-
     private static string FormatAge(TimeSpan? value)
     {
         if (value is null)
@@ -166,7 +153,8 @@ public static class OptOutPage
         StringBuilder content,
         HtmlEncoder encoder,
         IReadOnlyList<string> values,
-        string emptyMessage)
+        string emptyMessage, ExclusionResourceType type, IReadOnlySet<ExactResource>? excluded,
+        bool fresh, string? token)
     {
         if (values.Count == 0)
         {
@@ -182,10 +170,36 @@ public static class OptOutPage
         {
             content.Append("<li>");
             content.Append(encoder.Encode(value));
+            if (excluded?.Contains(new(type, value)) == true)
+                content.Append(" <strong>Excluded</strong>");
+            else if (fresh && !string.IsNullOrEmpty(token))
+            {
+                content.Append("<form method=\"post\" action=\"/operator\">");
+                content.Append($"<input type=\"hidden\" name=\"resourceType\" value=\"{encoder.Encode(type.ToString())}\">");
+                content.Append($"<input type=\"hidden\" name=\"resourceValue\" value=\"{encoder.Encode(value)}\">");
+                content.Append($"<input type=\"hidden\" name=\"__RequestVerificationToken\" value=\"{encoder.Encode(token)}\">");
+                content.Append("<button type=\"submit\">Exclude from DN42Atlas</button></form>");
+            }
             content.Append("</li>");
         }
 
         content.Append("</ul>");
+    }
+
+    public static string RenderMutationStatus(MutationStatus status)
+    {
+        var message = status switch
+        {
+            MutationStatus.InvalidRequest => "Invalid exclusion request. No exclusion was recorded.",
+            MutationStatus.NotAuthorized => "The current registry does not authorize this exact resource, or is not fresh. No exclusion was recorded.",
+            MutationStatus.NotRecorded => "The exclusion was not recorded. Please contact the operator.",
+            MutationStatus.RecordedRuntimeUnavailable => "Your exclusion has been recorded, but runtime policy reconciliation failed. Crawling and the public listing are unavailable pending reconciliation.",
+            MutationStatus.RecordedPublicationWithdrawn => "Your exclusion has been recorded and future probing is blocked, but the public Atlas could not be regenerated and has been withdrawn pending reconciliation.",
+            MutationStatus.WithdrawalFailed => "Your exclusion has been recorded, but public withdrawal could not be completed. Operator intervention is required.",
+            MutationStatus.UncertainWithdrawalFailed => "The exclusion status could not be confirmed and public withdrawal could not be completed. Immediate operator intervention is required.",
+            _ => "The exclusion status could not be confirmed. The public listing has been withdrawn pending operator reconciliation."
+        };
+        return Layout("DN42Atlas exclusion status", $"<h1>Exclusion status</h1><p>{HtmlEncoder.Default.Encode(message)}</p><p><a href=\"/operator\">Back to operator dashboard</a></p>");
     }
 
     private static string Layout(string title, string content)

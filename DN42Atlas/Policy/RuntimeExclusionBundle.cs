@@ -98,13 +98,7 @@ public static class RuntimeExclusionBundle
 
         try
         {
-            await using (var stream = new FileStream(
-                temporaryPath,
-                FileMode.CreateNew,
-                FileAccess.Write,
-                FileShare.None,
-                bufferSize: 4096,
-                FileOptions.WriteThrough))
+            await using (var stream = DN42Atlas.IO.PrivateFile.CreateNew(temporaryPath))
             {
                 await JsonSerializer.SerializeAsync(
                     stream,

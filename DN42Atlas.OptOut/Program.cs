@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using DN42Atlas.OptOut.Auth;
 using DN42Atlas.OptOut.Exclusions;
 using DN42Atlas.OptOut.Registry;
@@ -10,6 +9,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using Microsoft.AspNetCore.Http.Features;
 
 const string cookieScheme = "DN42Atlas.Cookie";
 const string oidcScheme = "Auth42";
@@ -18,7 +18,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 var maintenanceCommand = args.FirstOrDefault();
 
-if (maintenanceCommand is "exclusions-init" or "exclusions-materialize")
+if (maintenanceCommand is "exclusions-init" or "exclusions-materialize" or "exclusions-reconcile")
 {
     try
     {
@@ -37,13 +37,23 @@ if (maintenanceCommand is "exclusions-init" or "exclusions-materialize")
             Console.WriteLine(
                 "Exclusion database and empty runtime policy initialized.");
         }
-        else
+        else if (maintenanceCommand == "exclusions-materialize")
         {
             await ExclusionMaintenance.MaterializeAsync(
                 databasePath,
                 runtimeBundlePath);
             Console.WriteLine(
                 "Runtime exclusion policy materialized from active records.");
+        }
+        else
+        {
+            var paths = MutationPaths.FromConfiguration(builder.Configuration);
+            using var logs = LoggerFactory.Create(options => options.AddConsole());
+            var result = await new ExclusionReconciler(new ExclusionStore(databasePath), paths,
+                logs.CreateLogger<ExclusionReconciler>()).ReconcileAsync();
+            if (result != ReconciliationStatus.Success)
+                throw new InvalidOperationException("Exclusion reconciliation failed. The public listing was withdrawn where possible.");
+            Console.WriteLine("Runtime policy and public Atlas reconciled from active database records.");
         }
     }
     catch (Exception ex)
@@ -67,6 +77,8 @@ var authority = RequiredSetting(
 var registryPath = RequiredSetting(
     builder.Configuration,
     "DN42ATLAS_REGISTRY_PATH");
+if (!Path.IsPathFullyQualified(registryPath))
+    throw new InvalidOperationException("DN42ATLAS_REGISTRY_PATH must be an explicit absolute path.");
 var exclusionDatabasePath = RequiredSetting(
     builder.Configuration,
     "DN42ATLAS_EXCLUSION_DB_PATH");
@@ -81,8 +93,9 @@ var registryDomainPath = Path.Combine(registryPath, "data", "dns");
 var registryIpv4Path = Path.Combine(registryPath, "data", "inetnum");
 var registryIpv6Path = Path.Combine(registryPath, "data", "inet6num");
 var exclusionStore = new ExclusionStore(exclusionDatabasePath);
+var mutationPaths = MutationPaths.FromConfiguration(builder.Configuration);
 exclusionStore.ValidateExisting();
-_ = RuntimeExclusionBundle.Load(runtimeExclusionsPath);
+_ = ExclusionPolicy.Load(mutationPaths.Hosts, mutationPaths.Prefixes, runtimeExclusionsPath);
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
@@ -102,6 +115,27 @@ builder.Services.AddSingleton(
         registryPath,
         TimeSpan.FromHours(registryMaximumAgeHours)));
 builder.Services.AddSingleton(exclusionStore);
+builder.Services.AddSingleton(mutationPaths);
+builder.Services.AddSingleton(service => new RegistryResourceAuthorizer(
+    service.GetRequiredService<RegistryDomainCatalog>(), service.GetRequiredService<RegistryAllocationCatalog>(),
+    service.GetRequiredService<RegistrySnapshotService>().GetSnapshot));
+builder.Services.AddSingleton<ExclusionReconciler>();
+builder.Services.AddSingleton<ExclusionMutationCoordinator>();
+builder.Services.AddAntiforgery(options =>
+{
+    options.Cookie.Name = "__Host-DN42Atlas.Antiforgery";
+    options.Cookie.HttpOnly = true;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.Cookie.SameSite = SameSiteMode.Strict;
+    options.FormFieldName = "__RequestVerificationToken";
+});
+builder.Services.Configure<FormOptions>(options =>
+{
+    options.ValueCountLimit = 3;
+    options.KeyLengthLimit = 64;
+    options.ValueLengthLimit = 512;
+    options.BufferBodyLengthLimit = 4096;
+});
 
 builder.Services
     .AddAuthentication(options =>
@@ -168,6 +202,12 @@ builder.Services.AddAuthorization();
 var app = builder.Build();
 
 app.UseForwardedHeaders();
+app.UseExceptionHandler(errors => errors.Run(async context =>
+{
+    context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+    context.Response.Headers.CacheControl = "no-store";
+    await context.Response.WriteAsync("Operator service unavailable. Please contact the operator.");
+}));
 
 if (!app.Environment.IsDevelopment())
     app.UseHsts();
@@ -176,50 +216,7 @@ app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapGet("/operator", (
-    ClaimsPrincipal principal,
-    RegistryDomainCatalog domains,
-    RegistryAllocationCatalog allocations,
-    RegistrySnapshotService snapshots) =>
-{
-    if (principal.Identity?.IsAuthenticated != true)
-        return Results.Content(
-            OptOutPage.RenderSignedOut(),
-            "text/html; charset=utf-8");
-
-    if (!Auth42Identity.TryFromPrincipal(principal, out var identity))
-        return Results.Unauthorized();
-
-    var snapshot = snapshots.GetSnapshot();
-    IReadOnlyList<string> maintainedDomains;
-    MaintainedAllocations maintainedAllocations;
-    var ownershipAvailable = true;
-
-    try
-    {
-        maintainedDomains =
-            domains.FindDomains(identity!.ActiveMaintainer);
-        maintainedAllocations =
-            allocations.FindAllocations(identity.ActiveMaintainer);
-    }
-    catch (Exception ex) when (
-        ex is IOException or UnauthorizedAccessException)
-    {
-        maintainedDomains = [];
-        maintainedAllocations = new MaintainedAllocations([], []);
-        ownershipAvailable = false;
-    }
-
-    return Results.Content(
-        OptOutPage.RenderSignedIn(
-            identity!,
-            maintainedDomains,
-            maintainedAllocations.Ipv4Prefixes,
-            maintainedAllocations.Ipv6Prefixes,
-            snapshot,
-            ownershipAvailable),
-        "text/html; charset=utf-8");
-});
+OperatorEndpoints.Map(app);
 
 app.MapGet("/login", () =>
     Results.Challenge(
