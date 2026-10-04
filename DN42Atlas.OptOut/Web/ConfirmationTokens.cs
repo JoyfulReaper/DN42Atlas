@@ -11,16 +11,17 @@ public sealed class ConfirmationTokens(IDataProtectionProvider provider, TimePro
     private readonly IDataProtector protector = provider.CreateProtector("DN42Atlas.OperatorConfirmation.v1");
     private readonly TimeProvider clock = clock ?? TimeProvider.System;
     private sealed record Payload(string Operation, ExactResource Resource, string Subject, string Maintainer,
-        DateTimeOffset IssuedAt, long? ActiveRecordId);
+        DateTimeOffset IssuedAt, long? ActiveRecordId, long? LatestRecordId);
 
-    public string Create(string operation, ExactResource resource, Auth42Identity identity, long? activeRecordId) =>
+    public string Create(string operation, ExactResource resource, Auth42Identity identity, long? recordId) =>
         protector.Protect(JsonSerializer.Serialize(new Payload(operation, resource, identity.Subject,
-            identity.ActiveMaintainer, clock.GetUtcNow(), activeRecordId)));
+            identity.ActiveMaintainer, clock.GetUtcNow(), operation == "include" ? recordId : null,
+            operation == "exclude" ? recordId : null)));
 
     public bool TryValidate(string token, string operation, ExactResource resource, Auth42Identity identity,
-        out long? activeRecordId)
+        out long? recordId)
     {
-        activeRecordId = null;
+        recordId = null;
         if (string.IsNullOrEmpty(token) || token.Length > 4096) return false;
         try
         {
@@ -29,7 +30,7 @@ public sealed class ConfirmationTokens(IDataProtectionProvider provider, TimePro
                 payload.Subject != identity.Subject || payload.Maintainer != identity.ActiveMaintainer ||
                 payload.IssuedAt > clock.GetUtcNow() || clock.GetUtcNow() - payload.IssuedAt > TimeSpan.FromMinutes(5) ||
                 (operation == "include" && payload.ActiveRecordId is not > 0)) return false;
-            activeRecordId = payload.ActiveRecordId;
+            recordId = operation == "include" ? payload.ActiveRecordId : payload.LatestRecordId;
             return true;
         }
         catch (Exception ex) when (ex is CryptographicException or JsonException or FormatException or ArgumentException)

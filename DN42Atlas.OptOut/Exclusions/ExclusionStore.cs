@@ -162,6 +162,32 @@ public sealed class ExclusionStore(string databasePath)
         return await ReadRecordsAsync(command, cancellationToken);
     }
 
+    public async Task<ExclusionRecord?> GetLatestAsync(ExclusionResourceType resourceType, string resourceValue,
+        CancellationToken cancellationToken = default)
+    {
+        var normalized = resourceType switch
+        {
+            ExclusionResourceType.Domain => ExclusionResourceNormalizer.NormalizeDomain(resourceValue),
+            ExclusionResourceType.IPv4Prefix => ExclusionResourceNormalizer.NormalizePrefix(resourceValue, AddressFamily.InterNetwork),
+            ExclusionResourceType.IPv6Prefix => ExclusionResourceNormalizer.NormalizePrefix(resourceValue, AddressFamily.InterNetworkV6),
+            _ => throw new ArgumentOutOfRangeException(nameof(resourceType))
+        };
+        await using var connection = OpenExisting();
+        await using var command = connection.CreateCommand();
+        // AUTOINCREMENT IDs provide a monotonic generation, independent of timestamps or revocation.
+        command.CommandText = """
+            SELECT Id, ResourceType, ResourceValue, Subject, Maintainer, Asn,
+                RegistryCommitSha, RegistryObservedAtUtc, CreatedUtc, RevokedUtc
+            FROM Exclusions
+            WHERE ResourceType = $resourceType AND ResourceValue = $resourceValue
+            ORDER BY Id DESC
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$resourceType", resourceType.ToString());
+        command.Parameters.AddWithValue("$resourceValue", normalized);
+        return (await ReadRecordsAsync(command, cancellationToken)).SingleOrDefault();
+    }
+
     public async Task<ExclusionRecord?> GetByIdAsync(
         long id,
         CancellationToken cancellationToken = default)

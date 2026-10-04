@@ -9,7 +9,8 @@ public enum MutationStatus { Success, InvalidRequest, NotAuthorized, NotRecorded
     RecordedPublicationWithdrawn, WithdrawalFailed, Uncertain, UncertainWithdrawalFailed,
     Conflict, InclusionRestored, InclusionUnavailable }
 
-public sealed record ConfirmationPreparation(MutationStatus Status, ExactResource? Resource = null, long? ActiveRecordId = null);
+// Inclusion binds the active row; exclusion binds the latest historical generation (possibly absent).
+public sealed record ConfirmationPreparation(MutationStatus Status, ExactResource? Resource = null, long? RecordId = null);
 
 // Narrow operation seams also allow recovery failures to be exercised without a crawler or web server.
 public sealed class InclusionOperations
@@ -47,9 +48,14 @@ public sealed class ExclusionMutationCoordinator(ExclusionStore store, RegistryR
             var manual = ExclusionPolicy.Load(paths.Hosts, paths.Prefixes);
             var active = (await store.GetActiveAsync(cancellationToken))
                 .SingleOrDefault(r => r.ResourceType == resource.Type && r.ResourceValue == resource.Value);
-            if (IsManuallyExcluded(manual, resource) || (operation == "include" && active == null))
+            // A new exclusion confirmation is only meaningful for an included resource.
+            // Otherwise its active-row ID would remain unchanged after inclusion revoked that row.
+            if (IsManuallyExcluded(manual, resource) || (operation == "include" && active == null) ||
+                (operation == "exclude" && active != null))
                 return new(MutationStatus.Conflict);
-            return new(MutationStatus.Success, resource, operation == "include" ? active!.Id : null);
+            var recordId = operation == "include" ? active!.Id
+                : (await store.GetLatestAsync(resource.Type, resource.Value, cancellationToken))?.Id;
+            return new(MutationStatus.Success, resource, recordId);
         }
         catch (Exception ex)
         {
@@ -153,7 +159,7 @@ public sealed class ExclusionMutationCoordinator(ExclusionStore store, RegistryR
     }
 
     public async Task<MutationStatus> ExcludeAsync(Auth42Identity identity, string type, string value,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, long? expectedLatestRecordId = null)
     {
         ExactResource resource;
         try { resource = ExactResource.Parse(type, value); }
@@ -164,11 +170,16 @@ public sealed class ExclusionMutationCoordinator(ExclusionStore store, RegistryR
         {
             DN42Atlas.Registry.RegistrySnapshot? snapshot;
             IReadOnlyList<ExclusionRecord> before;
+            bool alreadyActive;
             try
             {
                 snapshot = authorizer.Authorize(identity.ActiveMaintainer, resource);
                 if (snapshot == null) return MutationStatus.NotAuthorized;
                 before = await store.GetActiveAsync(cancellationToken);
+                alreadyActive = before.Any(r => r.ResourceType == resource.Type && r.ResourceValue == resource.Value);
+                if (!alreadyActive &&
+                    (await store.GetLatestAsync(resource.Type, resource.Value, cancellationToken))?.Id != expectedLatestRecordId)
+                    return MutationStatus.Conflict;
             }
             catch (Exception ex)
             {
@@ -187,9 +198,12 @@ public sealed class ExclusionMutationCoordinator(ExclusionStore store, RegistryR
             try
             {
                 // Complete recovery even if the client disconnects after the critical sequence starts.
-                await store.AddAsync(new NewExclusionRecord(resource.Type, resource.Value, identity.Subject,
-                    identity.ActiveMaintainer, identity.Asn, snapshot.CommitSha!, snapshot.ObservedAt!.Value,
-                    DateTimeOffset.UtcNow));
+                // An active exclusion is idempotent regardless of the token's historical generation.
+                // Still reconcile its policy/publication, but never attempt another INSERT.
+                if (!alreadyActive)
+                    await store.AddAsync(new NewExclusionRecord(resource.Type, resource.Value, identity.Subject,
+                        identity.ActiveMaintainer, identity.Asn, snapshot.CommitSha!, snapshot.ObservedAt!.Value,
+                        DateTimeOffset.UtcNow));
             }
             catch (Exception ex)
             {

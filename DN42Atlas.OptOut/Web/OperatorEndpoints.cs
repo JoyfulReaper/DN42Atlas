@@ -93,7 +93,7 @@ public static class OperatorEndpoints
             status = prepared.Status;
             if (status == MutationStatus.Success)
             {
-                var token = tokens.Create(operation, prepared.Resource!, identity!, prepared.ActiveRecordId);
+                var token = tokens.Create(operation, prepared.Resource!, identity!, prepared.RecordId);
                 return Results.Content(OptOutPage.RenderConfirmation(operation, prepared.Resource!,
                     antiforgery.GetAndStoreTokens(context).RequestToken!, token), "text/html; charset=utf-8");
             }
@@ -103,11 +103,11 @@ public static class OperatorEndpoints
             ExactResource resource;
             try { resource = ExactResource.Parse(form["resourceType"].ToString(), form["resourceValue"].ToString()); }
             catch (Exception ex) when (ex is ArgumentException or FormatException) { return Results.BadRequest(); }
-            if (!tokens.TryValidate(form["confirmationToken"].ToString(), operation, resource, identity!, out var activeId))
+            if (!tokens.TryValidate(form["confirmationToken"].ToString(), operation, resource, identity!, out var recordId))
                 return Results.BadRequest();
             status = operation == "exclude"
-                ? await coordinator.ExcludeAsync(identity!, resource.Type.ToString(), resource.Value, context.RequestAborted)
-                : await coordinator.IncludeAsync(identity!, resource.Type.ToString(), resource.Value, activeId!.Value, context.RequestAborted);
+                ? await coordinator.ExcludeAsync(identity!, resource.Type.ToString(), resource.Value, context.RequestAborted, recordId)
+                : await coordinator.IncludeAsync(identity!, resource.Type.ToString(), resource.Value, recordId!.Value, context.RequestAborted);
             if (status == MutationStatus.Success) return Results.Redirect("/operator?result=" + (operation == "exclude" ? "excluded" : "included"));
         }
         var code = status switch

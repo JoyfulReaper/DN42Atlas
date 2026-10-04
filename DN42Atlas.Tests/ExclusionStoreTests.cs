@@ -97,6 +97,29 @@ public sealed class ExclusionStoreTests
         Assert.IsNotNull((await store.GetByIdAsync(record.Id))!.RevokedUtc);
     }
 
+    [TestMethod]
+    [DataRow(ExclusionResourceType.Domain, " Example.DN42. ", "example.dn42")]
+    [DataRow(ExclusionResourceType.IPv4Prefix, "172.20.16.7/24", "172.20.16.0/24")]
+    [DataRow(ExclusionResourceType.IPv6Prefix, "FD42:1234::7/48", "fd42:1234::/48")]
+    public async Task LatestResourceHistoryIncludesRevokedRowsAndUsesMonotonicIds(
+        ExclusionResourceType type, string input, string normalized)
+    {
+        using var files = new TestFiles();
+        var store = new ExclusionStore(await InitializeStoreAsync(files));
+        Assert.IsNull(await store.GetLatestAsync(type, input));
+        var first = await store.AddAsync(NewRecord(type, input));
+        Assert.AreEqual(first, await store.GetLatestAsync(type, normalized));
+        Assert.IsTrue(await store.RevokeAsync(first.Id, DateTimeOffset.UtcNow));
+        Assert.AreEqual(await store.GetByIdAsync(first.Id), await store.GetLatestAsync(type, input));
+        var second = await store.AddAsync(NewRecord(type, normalized) with { CreatedUtc = first.CreatedUtc.AddDays(-1) });
+        Assert.IsGreaterThan(first.Id, second.Id);
+        Assert.AreEqual(second, await store.GetLatestAsync(type, input));
+        await store.AddAsync(NewRecord(ExclusionResourceType.Domain, "unrelated.dn42"));
+        Assert.AreEqual(second, await store.GetLatestAsync(type, input));
+        Assert.IsTrue(await store.RevokeAsync(second.Id, DateTimeOffset.UtcNow));
+        Assert.AreEqual(await store.GetByIdAsync(second.Id), await store.GetLatestAsync(type, input));
+    }
+
     private static async Task<string> InitializeStoreAsync(TestFiles files)
     {
         var databasePath = Path.Combine(files.DirectoryPath, "exclusions.db");

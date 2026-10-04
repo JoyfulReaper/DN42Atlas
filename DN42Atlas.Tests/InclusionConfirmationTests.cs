@@ -372,7 +372,7 @@ public sealed class InclusionConfirmationTests
         Assert.IsNotNull((await f.Store.GetByIdAsync(original.Id))!.RevokedUtc);
         var second = secondOperation == "include"
             ? coordinator.IncludeAsync(f.Identity, "Domain", "owned.dn42", original.Id)
-            : coordinator.ExcludeAsync(f.Identity, "Domain", "owned.dn42");
+            : coordinator.ExcludeAsync(f.Identity, "Domain", "owned.dn42", expectedLatestRecordId: original.Id);
         try { Assert.IsFalse(second.IsCompleted); }
         finally { release.SetResult(); }
         Assert.AreEqual(MutationStatus.Success, await first);
@@ -494,8 +494,12 @@ public sealed class InclusionConfirmationTests
         Assert.AreEqual(expected, files.LoadPolicy().IsPrefixExcluded(allocation));
     }
 
-    private static Task<MutationStatus> Exclude(MutationFixture f, string type = "Domain", string value = "owned.dn42") =>
-        f.Coordinator.ExcludeAsync(f.Identity, type, value);
+    private static async Task<MutationStatus> Exclude(MutationFixture f, string type = "Domain", string value = "owned.dn42")
+    {
+        var resource = ExactResource.Parse(type, value);
+        var latest = await f.Store.GetLatestAsync(resource.Type, resource.Value);
+        return await f.Coordinator.ExcludeAsync(f.Identity, type, value, expectedLatestRecordId: latest?.Id);
+    }
 
     private static string Item(string html, string resource)
     {
