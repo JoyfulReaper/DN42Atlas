@@ -107,7 +107,7 @@ public sealed class WebScanCommand(WebScanner scanner, IReadOnlyList<(string, in
                     Results =
                         orderedResults
                 })!;
-        new PublicScanPolicy(exclusionPolicy).Apply(publicScan);
+        // Preserve the raw snapshot; reports and publication filter their own in-memory copies.
         var webJson = publicScan.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
 
         await File.WriteAllTextAsync(

@@ -123,7 +123,7 @@ public sealed class CommandTests
         try
         {
             Environment.CurrentDirectory = files.DirectoryPath;
-            var run = new RunCommand(new ResolveCommand(resolver, registry), new WebScanCommand(scanner, targets, policy));
+            var run = new RunCommand(new ResolveCommand(resolver, registry), new WebScanCommand(scanner, targets, policy), policy);
             Assert.AreEqual(0, await run.ExecuteAsync());
         }
         finally { Environment.CurrentDirectory = previousDirectory; }
@@ -156,7 +156,7 @@ public sealed class CommandTests
         {
             Environment.CurrentDirectory = files.DirectoryPath;
             var run = new RunCommand(new ResolveCommand(new RegistryResolver(policy), Path.Combine(files.DirectoryPath, "missing")),
-                new WebScanCommand(scanner, HttpProbeTargets.All, policy));
+                new WebScanCommand(scanner, HttpProbeTargets.All, policy), policy);
             await Assert.ThrowsAsync<DirectoryNotFoundException>(() => run.ExecuteAsync());
             Assert.IsFalse(Directory.Exists(Path.Combine(files.DirectoryPath, "results")));
         }
@@ -183,7 +183,7 @@ public sealed class CommandTests
         try
         {
             Environment.CurrentDirectory = files.DirectoryPath;
-            var run = new RunCommand(new ResolveCommand(resolver, registry), new WebScanCommand(scanner, targets, policy));
+            var run = new RunCommand(new ResolveCommand(resolver, registry), new WebScanCommand(scanner, targets, policy), policy);
             await Assert.ThrowsAsync<InvalidDataException>(() => run.ExecuteAsync());
         }
         finally { Environment.CurrentDirectory = previousDirectory; }

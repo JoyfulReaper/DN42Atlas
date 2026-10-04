@@ -95,7 +95,7 @@ During the default registry/DNS command, hostname exclusions are checked before 
 
 `web-scan` checks hostname exclusions again when loading an existing resolution file. It then checks every saved address against prefix exclusions before probing. A hostname match or any matching address skips the entire domain: excluded scan targets are not probed and do not appear as service results in the scan JSON or its generated viewer.
 
-The public scan JSON records `ExcludedByHostname` and `ExcludedByPrefix` counts, without publishing the matched excluded hostnames or prefix rules. Excluded links and hostname mentions are removed; excluded identifiers in other metadata are redacted. This filtering does not resolve or probe discovered references. Console diagnostics can include the matched hostname, address, and rule.
+The public scan JSON records `ExcludedByHostname` and `ExcludedByPrefix` counts, without publishing the matched excluded hostnames or prefix rules. Excluded links and hostname mentions are removed; excluded identifiers in other metadata are redacted. This filtering does not resolve or probe discovered references. Console diagnostics can include the matched hostname, address, and rule. Historical JSON in `results/` is a private raw snapshot: target exclusions still prevent probing, but reference redaction is applied to reports and public artifacts rather than altering that source snapshot. Do not serve the historical directory.
 
 `robots.txt` controls HTTP page-content fetching. Atlas still requests `/robots.txt` and can record the origin and robots status when homepage fetching is disallowed. Complete exclusion removes the target from the scan entirely, before those HTTP requests.
 
@@ -187,6 +187,8 @@ DN42Atlas/
     AtlasReportGenerator.cs
   Publishing/
     ArtifactPublisher.cs
+    PublicArtifactGenerator.cs
+    PublicationState.cs
 DN42Atlas.Tests/
 config/
   excluded-hosts.txt
@@ -223,6 +225,7 @@ dn42atlas web-scan [resolution-file]    HTTP/HTTPS scan from saved DNS results
 dn42atlas probe-test                    Single-host HTTP/HTTPS probe test
 dn42atlas report <web-probe.json>        HTML viewer from existing scan JSON
 dn42atlas run                           Resolve, scan, generate HTML, publish stable files
+dn42atlas republish                     Rebuild current public artifacts without crawling
 dn42atlas --help | -h | help             Show usage without scanning
 ```
 
@@ -248,6 +251,31 @@ published/
 ```
 
 `published/` is the production static web root. Its `index.html` and `latest.json` contain the current public artifact; `results/` holds timestamped historical data and is separate from this web root.
+
+Public generation reads the raw scan into a fresh in-memory JSON model and applies the current `PublicScanPolicy` exactly once. Both `latest.json` and the HTML's embedded scan are serialized from that same filtered/redacted model. The original raw JSON remains unchanged. HTML serialization retains its safe default encoder so scan content cannot close the embedded script.
+
+### Private Publication State and Republish
+
+Each successful `run` records which immutable raw scan backs the public artifacts. Set `DN42ATLAS_PUBLICATION_STATE_PATH` to a private location outside the web root, for example `/var/lib/dn42atlas/publication-state.json`. The default is `.dn42atlas/publication-state.json` under the working directory, also outside `published/`.
+
+```json
+{
+  "version": 1,
+  "rawScanPath": "/opt/DN42Atlas/results/web-probe-20261003-125026.json",
+  "publishedAtUtc": "2026-10-03T13:00:00Z",
+  "rawScanSha256": "<64 hexadecimal characters>"
+}
+```
+
+State contains metadata only, including the absolute raw scan path and required SHA-256 hash. It is staged and flushed beside the private state file, then atomically replaced only after both public files have been replaced. It is not updated if public publication fails. Existing publications created before state tracking need one successful `run` to establish state; Atlas never guesses a source from filenames or modification times.
+
+```bash
+dotnet run --project DN42Atlas -- republish
+```
+
+`republish` uses only the state-recorded raw file and the current required manual exclusion files plus `DN42ATLAS_RUNTIME_EXCLUSIONS_PATH`, if configured. It verifies state version, absolute source path, source existence, and SHA-256 before generating anything. Missing or invalid state, replaced source content, invalid runtime exclusions, and failed regeneration fail closed without replacing public artifacts. No registry access, DNS lookup, HTTP probe, or crawl is performed. `GeneratedAt` and the viewer's Last scan timestamp remain those of the original scan; only publication time changes.
+
+Raw snapshots and private state must remain outside the served directory. Publish one pipeline at a time. The two public replacements and subsequent state replacement are not a single transaction: a crash or private state replacement failure after public replacement can leave state referring to the previous scan. Such failures return nonzero; preserve the raw snapshots and investigate before retrying. Configure filesystem paths directly, without aliases or links into the web root.
 
 The application owns and updates only the generated `index.html` and `latest.json`. On first publication it also installs self-contained `about.html`, `opt-out.html`, and `robots.txt` files from `DN42Atlas/site` when each destination file is absent. Existing support files are preserved byte-for-byte, so operators can maintain them manually. Other pages and assets in `published/`, including an operator-provided `site.css`, are left untouched. The bundled pages currently use inline styles and do not require `site.css`. Template changes require a rebuild and do not automatically replace an installed support file; update that file manually when needed.
 

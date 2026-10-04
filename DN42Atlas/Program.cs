@@ -2,6 +2,7 @@ using DN42Atlas.Commands;
 using DN42Atlas.Policy;
 using DN42Atlas.Probing;
 using DN42Atlas.Scanning;
+using DN42Atlas.Publishing;
 
 var command = args.FirstOrDefault() ?? "resolve";
 if (command is "--help" or "-h" or "help")
@@ -10,7 +11,7 @@ if (command is "--help" or "-h" or "help")
     return 0;
 }
 
-if (command is not ("resolve" or "web-scan" or "report" or "probe-test" or "run" or "registry-update"))
+if (command is not ("resolve" or "web-scan" or "report" or "probe-test" or "run" or "registry-update" or "republish"))
 {
     CommandUsage.Print();
     return 2;
@@ -25,6 +26,9 @@ try
         Path.Combine(Environment.CurrentDirectory, "config", "excluded-hosts.txt"),
         Path.Combine(Environment.CurrentDirectory, "config", "excluded-prefixes.txt"),
         Environment.GetEnvironmentVariable("DN42ATLAS_RUNTIME_EXCLUSIONS_PATH"));
+    if (command == "republish")
+        return await new RepublishCommand(exclusionPolicy,
+            Path.Combine(Environment.CurrentDirectory, "published"), PublicationState.ConfiguredPath).ExecuteAsync();
     var probeTargets = HttpProbeTargets.All;
     var resolve = new ResolveCommand(new RegistryResolver(exclusionPolicy));
     var webScan = new WebScanCommand(new WebScanner(exclusionPolicy, probeTargets), probeTargets, exclusionPolicy);
@@ -39,7 +43,7 @@ try
         case "web-scan":
             return await webScan.ExecuteAsync(args) != null ? 0 : 1;
         case "run":
-            return await new RunCommand(resolve, webScan).ExecuteAsync();
+            return await new RunCommand(resolve, webScan, exclusionPolicy).ExecuteAsync();
         default:
             await resolve.ExecuteAsync();
             return 0;

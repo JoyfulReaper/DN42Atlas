@@ -25,6 +25,13 @@ public static class AtlasReportGenerator
         var publicScan = JsonNode.Parse(scanJson) ?? throw new InvalidDataException("Scan JSON must not be null.");
         new PublicScanPolicy(exclusionPolicy).Apply(publicScan);
 
+        await File.WriteAllTextAsync(outputPath, GenerateHtml(publicScan), Encoding.UTF8, cancellationToken);
+    }
+
+    // The caller owns policy filtering; serialization still uses the safe default encoder.
+    public static string GenerateHtml(JsonNode publicScan)
+    {
+
         var lastScanHtml = string.Empty;
         if (publicScan["GeneratedAt"] is JsonValue generatedAtValue &&
             generatedAtValue.TryGetValue<string>(out var generatedAtText) &&
@@ -47,7 +54,7 @@ public static class AtlasReportGenerator
         }
 
         // Safe JSON serialization prevents string values from closing the HTML script element.
-        scanJson = publicScan.ToJsonString();
+        var scanJson = publicScan.ToJsonString();
 
         var html = $$"""
 <!doctype html>
@@ -1005,10 +1012,6 @@ render();
 </html>
 """;
 
-        await File.WriteAllTextAsync(
-            outputPath,
-            html,
-            Encoding.UTF8,
-            cancellationToken);
+        return html;
     }
 }

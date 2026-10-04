@@ -410,3 +410,6 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# Private local publication metadata
+.dn42atlas/
