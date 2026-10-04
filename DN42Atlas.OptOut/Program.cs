@@ -2,6 +2,8 @@ using DN42Atlas.OptOut.Auth;
 using DN42Atlas.OptOut.Exclusions;
 using DN42Atlas.OptOut.Registry;
 using DN42Atlas.OptOut.Web;
+using DN42Atlas.OptOut.ManualRequests;
+using JoyfulReaperLib.Ntfy;
 using DN42Atlas.Policy;
 using DN42Atlas.Registry;
 using Microsoft.AspNetCore.Authentication;
@@ -17,6 +19,22 @@ const string oidcScheme = "Auth42";
 var builder = WebApplication.CreateBuilder(args);
 
 var maintenanceCommand = args.FirstOrDefault();
+
+if (maintenanceCommand is "manual-requests-init" or "manual-requests" or "manual-request")
+{
+    try
+    {
+        var path = ManualRequestStore.ConfiguredPath(builder.Configuration);
+        if (maintenanceCommand == "manual-requests-init")
+        {
+            if (args.Length != 1) { Console.Error.WriteLine("Usage: manual-requests-init"); Environment.ExitCode = 2; }
+            else { await ManualRequestStore.InitializeAsync(path); Console.WriteLine("Private manual request database initialized."); }
+        }
+        else Environment.ExitCode = await ManualRequestCommands.ExecuteAsync(args, new(path), Console.Out);
+    }
+    catch (Exception ex) { Console.Error.WriteLine(ex.Message); Environment.ExitCode = 1; }
+    return;
+}
 
 if (maintenanceCommand is "exclusions-init" or "exclusions-materialize" or "exclusions-reconcile")
 {
@@ -95,6 +113,8 @@ var registryIpv6Path = Path.Combine(registryPath, "data", "inet6num");
 var exclusionStore = new ExclusionStore(exclusionDatabasePath);
 var mutationPaths = MutationPaths.FromConfiguration(builder.Configuration);
 exclusionStore.ValidateExisting();
+var manualRequestStore = new ManualRequestStore(ManualRequestStore.ConfiguredPath(builder.Configuration));
+manualRequestStore.ValidateExisting();
 _ = ExclusionPolicy.Load(mutationPaths.Hosts, mutationPaths.Prefixes, runtimeExclusionsPath);
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
@@ -122,6 +142,9 @@ builder.Services.AddSingleton(service => new RegistryResourceAuthorizer(
 builder.Services.AddSingleton<ExclusionReconciler>();
 builder.Services.AddSingleton<ExclusionMutationCoordinator>();
 builder.Services.AddSingleton<ConfirmationTokens>();
+builder.Services.AddSingleton(manualRequestStore);
+builder.Services.AddSingleton<ContactRateLimiter>();
+builder.Services.AddJoyfulReaperNtfy(builder.Configuration);
 builder.Services.AddAntiforgery(options =>
 {
     options.Cookie.Name = "__Host-DN42Atlas.Antiforgery";
@@ -132,10 +155,10 @@ builder.Services.AddAntiforgery(options =>
 });
 builder.Services.Configure<FormOptions>(options =>
 {
-    options.ValueCountLimit = 5;
+    options.ValueCountLimit = 6;
     options.KeyLengthLimit = 64;
     options.ValueLengthLimit = 4096;
-    options.BufferBodyLengthLimit = 8192;
+    options.BufferBodyLengthLimit = 32768;
 });
 
 builder.Services
@@ -218,6 +241,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 OperatorEndpoints.Map(app);
+ContactEndpoints.Map(app);
 
 app.MapGet("/login", () =>
     Results.Challenge(

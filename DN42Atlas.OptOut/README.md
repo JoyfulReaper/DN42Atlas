@@ -10,6 +10,7 @@ Configure the application with:
 - `DN42ATLAS_REGISTRY_PATH` (the root of a local DN42 registry checkout)
 - `DN42ATLAS_REGISTRY_MAX_AGE_HOURS` (optional; defaults to `72`)
 - `DN42ATLAS_EXCLUSION_DB_PATH` (the private SQLite audit database)
+- `DN42ATLAS_MANUAL_REQUEST_DB_PATH` (a separate, initialized private SQLite request database)
 - `DN42ATLAS_RUNTIME_EXCLUSIONS_PATH` (the active-rules JSON consumed by Atlas)
 - `DN42ATLAS_EXCLUDED_HOSTS_PATH` (the required manual hostname rules)
 - `DN42ATLAS_EXCLUDED_PREFIXES_PATH` (the required manual prefix rules)
@@ -26,8 +27,53 @@ In production, nginx should proxy only these application routes:
 - `/login`
 - `/logout`
 - `/signin-oidc`
+- `/contact` (anonymous manual request form)
 
 All other paths on `dn42atlas.dn42`, including `/`, should continue to be served by the static site. Publish the proxied routes through HTTPS so OIDC redirects and secure cookies work correctly.
+
+## Manual requests and notifications
+
+Authenticated self-service is preferred. Anonymous `GET /contact` and `POST /contact` provide a manual-review fallback for urgent opt-outs, broader or wildcard requests, ownership/authentication problems, corrections, and other concerns. Submitting a request never changes exclusions, runtime policy, publication state, or crawl results. There is no HTTP endpoint for reading private requests.
+
+The form requires Resource and Contact (each at most 255 characters), a RequestType of `OptOut`, `BroaderOrWildcard`, `OwnershipOrAuthentication`, `Correction`, or `Other`, and Message (at most 2000 characters). Contact may be any human contact string, not just email. Values are trimmed; control characters are rejected except newlines and tabs in Message. Submitted values are never redisplayed in HTML or placed in redirect URLs. There are no attachments or URL fetches.
+
+POST requires an antiforgery cookie/token pair, an empty `Website` honeypot, and exactly the six expected form fields. Only UTF-8 `application/x-www-form-urlencoded` is accepted, with a 32 KiB body limit including chunked requests. A filled honeypot receives the generic redirect without storing or notifying. A process-local global limit permits ten POST attempts per minute, including invalid attempts; excess attempts return 429. It does not use client IPs or `X-Forwarded-For`. This simple shared budget resets on restart and is not coordinated across processes.
+
+Initialize request storage explicitly before web startup:
+
+```text
+DN42ATLAS_MANUAL_REQUEST_DB_PATH=/var/lib/dn42atlas/manual-requests.sqlite
+DN42ATLAS_PUBLISHED_PATH=/opt/DN42Atlas/published
+dotnet run --project DN42Atlas.OptOut -- manual-requests-init
+```
+
+Supply these values through your deployment environment. Both paths must be absolute. The database must be outside the public root, separate from exclusion storage and other policy/state files; do not use filesystem aliases or links into the web root. Initialization refuses to overwrite any existing database. Startup validates existing storage and never creates a replacement for missing storage. New databases use owner read/write permissions (`0600`) on Unix; existing permissions and Windows ACLs are unchanged. Restrict access to the database and its directory to the service/operator accounts.
+
+The version-1 `ManualRequests` table records Id, CreatedUtc, Resource, Contact, RequestType, Message, Status, and nullable ReviewedUtc. New records are `Pending`; the schema also permits `Reviewed`, `Resolved`, and `Rejected` for future review work. No status mutation command is provided in this slice. Records and the full message remain private and are never serialized into public Atlas artifacts.
+
+Web startup also requires the standard JoyfulReaperLib.Ntfy configuration, supplied through environment variables, for example:
+
+```text
+Ntfy__ServerUrl=https://ntfy.kgivler.com
+Ntfy__Topic=<private-topic>
+Ntfy__AccessToken=<deployment-secret>
+Ntfy__Timeout=00:00:05
+```
+
+Use a private topic and supply the bearer token through deployment secrets, never source control. The library validates the server URL, topic, and positive timeout at startup. Its default timeout is ten seconds. The application references only the ntfy project from the pinned `external/JoyfulReaperLib` Git submodule; initialize submodules before building. No custom notification HTTP client is used.
+
+A valid request commits to SQLite first, then completes a redirect to `/contact?result=recorded`, then attempts notification. The notification title is `DN42Atlas manual request`, priority is High, and tags are `dn42` and `atlas`. Its short summary includes request type, resource, contact, and request ID; the full Message and a click URL are omitted. Those summary fields are sent to the configured notification server. Notification failures log a warning without exposing token or message contents and preserve the saved request and successful response. There are no notification retries or durable queue: a process failure between saving and notifying can leave a pending request without a notification.
+
+Review requests locally, even when notifications are unavailable:
+
+```text
+dotnet run --project DN42Atlas.OptOut -- manual-requests
+dotnet run --project DN42Atlas.OptOut -- manual-request <id>
+```
+
+The first command lists pending request summaries; the second shows a selected record including its full message. These commands require only the request database and published-root settings, and run before OIDC, registry, or ntfy web startup validation. They do not approve requests or mutate exclusions.
+
+Deployment must route `/contact` to this application over HTTPS; no proxy configuration is installed by Atlas. The bundled `opt-out.html` links to the form. Existing published support pages are intentionally preserved, so update an already-installed opt-out page manually to add the link. This does not publish crawl results or change the temporary landing page.
 
 ## Registry freshness
 

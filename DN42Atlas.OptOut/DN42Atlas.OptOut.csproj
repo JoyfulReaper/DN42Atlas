@@ -8,5 +8,6 @@
     <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.12" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
     <ProjectReference Include="../DN42Atlas/DN42Atlas.csproj" />
+    <ProjectReference Include="../external/JoyfulReaperLib/JoyfulReaperLib.Ntfy/JoyfulReaperLib.Ntfy.csproj" />
   </ItemGroup>
 </Project>

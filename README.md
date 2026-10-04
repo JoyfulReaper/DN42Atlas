@@ -147,6 +147,14 @@ Specifically:
 
 ## Build
 
+For a fresh checkout, use `git clone --recurse-submodules`, or initialize an existing checkout with:
+
+```bash
+git submodule update --init --recursive
+```
+
+The pinned `external/JoyfulReaperLib` submodule supplies only its ntfy project to `DN42Atlas.OptOut`; no machine-local sibling checkout or private package feed is required.
+
 From the repository root:
 
 ```bash
@@ -194,6 +202,10 @@ DN42Atlas/
     PublicArtifactGenerator.cs
     PublicationState.cs
 DN42Atlas.Tests/
+DN42Atlas.OptOut/
+  ManualRequests/
+  Web/ContactEndpoints.cs
+external/JoyfulReaperLib/
 config/
   excluded-hosts.txt
   excluded-prefixes.txt
@@ -217,6 +229,8 @@ dotnet test
 Tests use temporary fixtures, fake DNS/probe functions, HTTP responses, and in-memory connection streams; they do not contact DN42
 or external services. MSTest is used only by the test project; CIDR matching uses
 the existing implementation without additional networking packages.
+
+The OptOut application also serves an anonymous `/contact` form for manual requests. Authenticated self-service remains preferred; manual submissions are private pending records and never automatically change exclusions or publication. Notifications use JoyfulReaperLib.Ntfy after saving the request and completing the response. Local `manual-requests` and `manual-request <id>` commands support review without a web records endpoint. See [OptOut configuration and deployment](DN42Atlas.OptOut/README.md#manual-requests-and-notifications) for private database initialization, ntfy environment settings, form limits, and deployment steps. The bundled opt-out page links to the form; existing installed support pages need that link added manually.
 
 ## Commands
 
