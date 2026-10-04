@@ -19,7 +19,7 @@ public sealed class PublicationTests
               "Results": [
                 {"Domain":"blocked.dn42","Scheme":"http","Port":80},
                 {"Domain":"BLOCKED.DN42","Scheme":"https","Port":443},
-                {"Domain":"good.dn42","Scheme":"http","Port":80,
+                {"Domain":"good.dn42","Scheme":"http","Port":80,"ProbeAddresses":["fd42:5678::1"],
                  "Title":"References BLOCKED.DN42 and child.private.dn42 at 172.20.16.7, [fd42:1234::1]; rules *.private.dn42 and fd42:1234::/48",
                  "RedirectLocation":"http://blocked.dn42/",
                  "DiscoveredLinks":["http://blocked.dn42/","http://child.private.dn42/","http://172.20.16.7/","http://[fd42:1234::1]/","http://private.dn42/","https://notblocked.dn42/","javascript:alert(1)"],

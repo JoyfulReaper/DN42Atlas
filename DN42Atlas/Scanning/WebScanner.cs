@@ -229,6 +229,7 @@ public sealed class WebScanner
                         : HttpProber.ProbeAsync(item.Domain, item.Scheme, item.Port,
                             exclusionPolicy, approvedAddresses[item.Domain], cancellationToken));
 
+                result.ProbeAddresses = ProbeAddressProvenance.Normalize(approvedAddresses[item.Domain]);
                 results.Add(result);
 
                 var currentCompleted =

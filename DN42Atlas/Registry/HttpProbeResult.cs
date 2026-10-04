@@ -16,6 +16,9 @@ public sealed class HttpProbeResult
 
     public int Port { get; init; }
 
+    // Scan-time approved/pinned destinations, not current DNS or just the successful socket address.
+    public string[] ProbeAddresses { get; set; } = [];
+
     public bool Reachable { get; init; }
 
     //

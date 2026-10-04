@@ -27,6 +27,7 @@ public sealed class ProbeSafetyTests
     [DataRow("172.20.1.1")]
     [DataRow("fd42:1234::1")]
     [DataRow("192.0.2.1")]
+    [DataRow("::ffff:172.20.2.1")]
     public async Task PublicProberRejectsExcludedOrExternalAddressSetsBeforeConnecting(string rejected)
     {
         using var files = new TestFiles(prefixes: "172.20.1.0/24\nfd42:1234::/48");
@@ -98,6 +99,42 @@ public sealed class ProbeSafetyTests
             (_, _, _) => throw new AssertFailedException("Unexpected host must not connect."));
         using var client = new HttpClient(handler);
         await Assert.ThrowsExactlyAsync<HttpRequestException>(() => client.GetAsync("http://other.dn42/"));
+    }
+
+    [TestMethod]
+    [DataRow("success")]
+    [DataRow("robots-disallowed")]
+    [DataRow("connect-failure")]
+    public async Task ProductionProbeRecordsCapturedApprovedAddressesWithoutDns(string outcome)
+    {
+        using var files = new TestFiles();
+        IPAddress[] addresses = [IPAddress.Parse("fd42:abcd:0:0:0:0:0:1"),
+            IPAddress.Parse("172.20.220.49"), IPAddress.Parse("fd42:abcd::1"), IPAddress.Parse("172.20.220.49")];
+        var expected = addresses.ToArray();
+        var calls = 0;
+        var result = await HttpProber.ProbeApprovedAsync("no-dns-required.dn42", "http", 8080,
+            files.LoadPolicy(), addresses, (destinations, port, _) =>
+            {
+                calls++;
+                CollectionAssert.AreEqual(expected, destinations);
+                Assert.AreEqual(8080, port);
+                addresses[0] = IPAddress.Parse("192.0.2.1");
+                if (outcome == "connect-failure") throw new IOException("test connection failed");
+                var body = outcome == "robots-disallowed" ? "User-agent: *\nDisallow: /\n" : "";
+                var status = calls == 1 && outcome != "robots-disallowed" ? "404 Not Found" : "200 OK";
+                return ValueTask.FromResult<Stream>(new DuplexStream($"HTTP/1.1 {status}\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n{body}"));
+            });
+        Assert.IsGreaterThan(0, calls);
+        CollectionAssert.AreEqual(new[] { "172.20.220.49", "fd42:abcd::1" }, result.ProbeAddresses);
+        Assert.AreEqual(outcome != "connect-failure", result.Reachable);
+        if (outcome == "robots-disallowed") Assert.IsFalse(result.RobotsAllowed.GetValueOrDefault(true));
+    }
+
+    [TestMethod]
+    public void ProvenanceNormalizationMapsIpv4MappedIpv6AndDeduplicates()
+    {
+        CollectionAssert.AreEqual(new[] { "172.20.220.49", "fd42::1" }, ProbeAddressProvenance.Normalize(
+            [IPAddress.Parse("::ffff:172.20.220.49"), IPAddress.Parse("172.20.220.49"), IPAddress.Parse("FD42:0:0:0:0:0:0:1")]));
     }
 
     private sealed class DuplexStream(string response) : Stream

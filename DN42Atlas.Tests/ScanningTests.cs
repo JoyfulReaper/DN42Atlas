@@ -15,6 +15,22 @@ namespace DN42Atlas.Tests;
 public sealed class ScanningTests
 {
     [TestMethod]
+    public async Task EveryScannerResultRecordsNormalizedUnionOfApprovedSavedAddresses()
+    {
+        using var files = new TestFiles();
+        var path = files.Write("resolution.json", """
+            [{"Domain":"good.dn42","Status":"Resolved","Addresses":["fd42:0:0:0:0:0:0:1","172.20.220.49"]},
+             {"Domain":"GOOD.DN42","Status":"Resolved","Addresses":["FD42::1","172.20.220.50"]}]
+            """);
+        var scanner = new WebScanner(files.LoadPolicy(), [("http", 80), ("https", 443)],
+            (domain, scheme, port, _) => Task.FromResult(new HttpProbeResult { Domain = domain, Scheme = scheme, Port = port }));
+        var scan = await scanner.ScanAsync(path);
+        Assert.HasCount(2, scan.Results);
+        foreach (var result in scan.Results)
+            CollectionAssert.AreEqual(new[] { "172.20.220.49", "172.20.220.50", "fd42::1" }, result.ProbeAddresses);
+    }
+
+    [TestMethod]
     public async Task RegistryExcludesHostsBeforeDnsAndAddressesBeforeResults()
     {
         using var files = new TestFiles("blocked.dn42\n*.private.dn42", "172.20.1.0/24");
@@ -102,8 +118,8 @@ public sealed class ScanningTests
         var actual = results.Select(x => (x.GetProperty("Domain").GetString(), x.GetProperty("Scheme").GetString(), x.GetProperty("Port").GetInt32())).ToArray();
         var expected = new[] { "a.dn42", "z.DN42" }.SelectMany(domain => HttpProbeTargets.All.Select(target => (domain, target.Scheme, target.Port))).OrderBy(x => x.domain).ThenBy(x => x.Scheme).ThenBy(x => x.Port).ToArray();
         CollectionAssert.AreEqual(expected, actual);
-        CollectionAssert.AreEqual(new[] { "Domain", "Scheme", "Port", "Reachable", "StatusCode", "ContentType", "Title", "HomepageRedirectLocation", "HomepageError", "ContentTruncated", "Robots", "RobotsStatusCode", "RobotsAllowed", "RedirectLocation", "DiscoveredLinks", "LinksTruncated", "Dn42Mentions", "Dn42MentionsTruncated", "Error" }, results[0].EnumerateObject().Select(x => x.Name).ToArray());
-        Assert.AreEqual(JsonSerializer.SerializeToElement(new HttpProbeResult { Domain = "a.dn42", Scheme = "http", Port = 80, Reachable = true }).GetRawText(), JsonSerializer.Serialize(results[0]));
+        CollectionAssert.AreEqual(new[] { "Domain", "Scheme", "Port", "ProbeAddresses", "Reachable", "StatusCode", "ContentType", "Title", "HomepageRedirectLocation", "HomepageError", "ContentTruncated", "Robots", "RobotsStatusCode", "RobotsAllowed", "RedirectLocation", "DiscoveredLinks", "LinksTruncated", "Dn42Mentions", "Dn42MentionsTruncated", "Error" }, results[0].EnumerateObject().Select(x => x.Name).ToArray());
+        Assert.AreEqual(JsonSerializer.SerializeToElement(new HttpProbeResult { Domain = "a.dn42", Scheme = "http", Port = 80, Reachable = true, ProbeAddresses = ["fd42::1"] }).GetRawText(), JsonSerializer.Serialize(results[0]));
     }
 
     [TestMethod]

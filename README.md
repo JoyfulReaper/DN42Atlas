@@ -99,7 +99,11 @@ The public scan JSON records `ExcludedByHostname` and `ExcludedByPrefix` counts,
 
 `robots.txt` controls HTTP page-content fetching. Atlas still requests `/robots.txt` and can record the origin and robots status when homepage fetching is disallowed. Complete exclusion removes the target from the scan entirely, before those HTTP requests.
 
-`probe-test` also checks hostname exclusions before DNS and validates the entire resolved address set before probing. `report` reapplies current hostname exclusions and reference redaction when generating HTML, without changing the input snapshot or making network requests. Historical service results do not include destination addresses, so their current prefix membership cannot be verified offline; review old snapshots before publishing them under a changed prefix policy.
+`probe-test` also checks hostname exclusions before DNS and validates the entire resolved address set before probing. Future raw scan results include `ProbeAddresses`, a string array containing the complete approved/pinned destination set at scan time, including for failed probes. Addresses are normalized, deduplicated, and ordered with an ordinal string comparison; IPv4-mapped IPv6 normalizes to IPv4 consistently with exclusion matching. This is historical provenance, not the single address that happened to connect or live DNS state. Existing DN42 destination validation remains unchanged.
+
+`report` and public generation remove an entire service result when its hostname is excluded or any recorded `ProbeAddresses` address matches an excluded prefix. Both IPv4 and IPv6 CIDRs are supported; address families must match after IPv4-mapped normalization. References in retained results are also filtered/redacted. No DNS lookup or probe is performed during publication or reporting, and source bytes and scan timestamps remain unchanged.
+
+Legacy scans without destination provenance remain readable and publishable with no prefix exclusions, including hostname-only policy. With any active manual or runtime prefix exclusion, every retained result must have a non-empty array of valid destination IP addresses. Missing, empty, malformed, or partially missing provenance fails closed instead of guessing historical destinations from current DNS. Publication withdraws `published/index.html` and `published/latest.json` where possible, preserves support pages and private publication state, and returns failure. Exclusion reconciliation keeps the recorded runtime exclusion effective for future crawling and reports the withdrawn listing. A new provenance-aware scan is needed for safe prefix re-filtering; old raw files are never retrofitted or modified.
 
 ## DN42 Address Guard
 
@@ -280,7 +284,7 @@ dotnet run --project DN42Atlas -- publish-existing results/web-probe-20261003-12
 dotnet run --project DN42Atlas -- republish
 ```
 
-`republish` uses only the state-recorded raw file and the current required manual exclusion files plus `DN42ATLAS_RUNTIME_EXCLUSIONS_PATH`, if configured. It verifies state version, absolute source path, source existence, and SHA-256 before generating anything. Missing or invalid state, replaced source content, invalid runtime exclusions, and failed regeneration fail closed without replacing public artifacts. No registry access, DNS lookup, HTTP probe, or crawl is performed. `GeneratedAt` and the viewer's Last scan timestamp remain those of the original scan; only publication time changes.
+`republish` uses only the state-recorded raw file and the current required manual exclusion files plus `DN42ATLAS_RUNTIME_EXCLUSIONS_PATH`, if configured. It verifies state version, absolute source path, source existence, and SHA-256 before generating anything. Missing or invalid state, replaced source content, invalid runtime exclusions, and ordinary generation failures leave existing public artifacts unchanged. Insufficient destination provenance under an active prefix policy is a privacy failure: it withdraws both listing files rather than leaving an old listing pretending to comply with that policy. No registry access, DNS lookup, HTTP probe, or crawl is performed. `GeneratedAt` and the viewer's Last scan timestamp remain those of the original scan; only publication time changes on success.
 
 Raw snapshots and private state must remain outside the served directory. Publish one pipeline at a time. The two public replacements and subsequent state replacement are not a single transaction: a crash or private state replacement failure after public replacement can leave state referring to the previous scan. Such failures return nonzero; preserve the raw snapshots and investigate before retrying. Configure filesystem paths directly, without aliases or links into the web root.
 
@@ -371,7 +375,7 @@ dotnet run --project DN42Atlas -- web-scan \
 
 You do not need to rescan the network to generate the HTML viewer.
 
-The command is `report <web-probe.json>`. It filters supplied results and references against current hostname exclusions, safely embeds the JSON, and writes an HTML file alongside the JSON with the same basename. It does not alter the source snapshot or re-probe services; historical prefix limitations are described under Complete Exclusion.
+The command is `report <web-probe.json>`. It filters supplied results against current hostname exclusions and recorded destinations against prefix exclusions, filters/redacts references, safely embeds the JSON, and writes an HTML file alongside the JSON with the same basename. It does not alter the source snapshot or re-probe services. Insufficient prefix provenance fails closed and removes the previous output HTML where possible; legacy compatibility is described under Complete Exclusion.
 
 ```bash
 dotnet run --project DN42Atlas -- \

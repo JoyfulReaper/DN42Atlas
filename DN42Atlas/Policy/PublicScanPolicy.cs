@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using System.Net;
 
 namespace DN42Atlas.Policy;
 
@@ -14,6 +15,7 @@ public sealed class PublicScanPolicy(ExclusionPolicy exclusions)
         if (scan is JsonObject root && root["Results"] is JsonArray results)
         {
             var removedHosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var removedPrefixHosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             for (var index = results.Count - 1; index >= 0; index--)
             {
                 if (results[index] is JsonObject result &&
@@ -22,10 +24,34 @@ public sealed class PublicScanPolicy(ExclusionPolicy exclusions)
                 {
                     results.RemoveAt(index);
                     removedHosts.Add(domain);
+                    continue;
+                }
+                if (exclusions.PrefixRules.Count == 0) continue;
+                // Only recorded scan-time evidence can establish a historical destination.
+                // A host-excluded row is already gone and needs no prefix evidence.
+                if (results[index] is not JsonObject candidate ||
+                    candidate["ProbeAddresses"] is not JsonArray addresses || addresses.Count == 0)
+                    throw new MissingProbeAddressProvenanceException();
+                var matches = false;
+                foreach (var address in addresses)
+                {
+                    if (address is not JsonValue scalar || !scalar.TryGetValue<string>(out var text) ||
+                        !IPAddress.TryParse(text, out var parsed))
+                        throw new MissingProbeAddressProvenanceException();
+                    // IsAddressExcluded explicitly maps IPv4-mapped IPv6 to IPv4.
+                    matches |= exclusions.IsAddressExcluded(parsed);
+                }
+                if (matches)
+                {
+                    results.RemoveAt(index);
+                    if (candidate["Domain"] is JsonValue name && name.TryGetValue<string>(out var hostname))
+                        removedPrefixHosts.Add(hostname);
                 }
             }
             if (removedHosts.Count > 0 && root["ExcludedByHostname"] is JsonValue count && count.TryGetValue<int>(out var previous))
                 root["ExcludedByHostname"] = previous + removedHosts.Count;
+            if (removedPrefixHosts.Count > 0 && root["ExcludedByPrefix"] is JsonValue prefixCount && prefixCount.TryGetValue<int>(out var previousPrefix))
+                root["ExcludedByPrefix"] = previousPrefix + removedPrefixHosts.Count;
         }
         Filter(scan);
     }

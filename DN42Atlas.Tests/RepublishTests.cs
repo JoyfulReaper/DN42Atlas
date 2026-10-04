@@ -16,7 +16,7 @@ public sealed class RepublishTests
     private const string Raw = """
         {"GeneratedAt":"2026-10-03T12:50:26Z","ExcludedByHostname":2,"Results":[
           {"Domain":"blocked.dn42","Scheme":"http","Port":80},
-          {"Domain":"good.dn42","Scheme":"http","Port":80,
+          {"Domain":"good.dn42","Scheme":"http","Port":80,"ProbeAddresses":["fd42:5678::1"],
            "Title":"blocked.dn42 172.20.16.7 [fd42:1234::1] </script><script>alert(1)</script>",
            "DiscoveredLinks":["http://blocked.dn42/","http://172.20.16.7/","https://good.dn42/"],
            "Dn42Mentions":["blocked.dn42","good.dn42"]}]}

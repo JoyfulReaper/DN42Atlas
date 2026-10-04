@@ -79,7 +79,7 @@ public static class OptOutPage
         }
 
         content.Append("<p>Excluding a domain prevents future probes for that hostname and removes it from the currently published Atlas without another crawl.</p>");
-        content.Append("<p>Excluding a prefix prevents future probes to addresses in that allocation and removes or redacts matching address references from the current publication.</p>");
+        content.Append("<p>Excluding a prefix prevents future probes to addresses in that allocation and removes results whose recorded probe destinations match it. If an older scan lacks destination evidence, the public listing is withdrawn until a safe publication is available.</p>");
         content.Append("<p>Self-service exclusions cover exact registered resources only. Wildcards and broader or narrower allocations are not supported.</p>");
         content.Append("<p><a href=\"/logout\">Logout</a></p>");
 

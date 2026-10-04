@@ -549,8 +549,8 @@ internal sealed class MutationFixture : IDisposable
         f.SnapshotService = new(registry, TimeSpan.FromHours(72), new FixtureInspector(f, git));
         f.Files.Write("raw.json", """
             {"GeneratedAt":"2026-10-03T12:50:26Z","ExcludedByHostname":0,"Results":[
-              {"Domain":"owned.dn42","Scheme":"http","Port":80},
-              {"Domain":"other.dn42","Scheme":"http","Port":80,"Title":"references owned.dn42 172.20.16.7 fd42:1234::1"}]}
+              {"Domain":"owned.dn42","Scheme":"http","Port":80,"ProbeAddresses":["172.20.16.7","fd42:1234::1"]},
+              {"Domain":"other.dn42","Scheme":"http","Port":80,"ProbeAddresses":["fd42:5678::1"],"Title":"references owned.dn42 172.20.16.7 fd42:1234::1"}]}
             """);
         await ArtifactPublisher.PublishAsync(f.RawPath, f.Paths.Published, f.Files.LoadPolicy(), f.Paths.State);
         var services = new ServiceCollection();

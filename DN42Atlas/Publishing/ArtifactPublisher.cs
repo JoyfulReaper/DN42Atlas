@@ -27,7 +27,22 @@ public static class ArtifactPublisher
         var hash = Convert.ToHexString(SHA256.HashData(rawScan));
         if (expectedSha256 != null && !hash.Equals(expectedSha256, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Raw scan SHA-256 does not match publication state.");
-        var artifacts = PublicArtifactGenerator.Generate(rawScan, policy);
+        PublicArtifacts artifacts;
+        try { artifacts = PublicArtifactGenerator.Generate(rawScan, policy); }
+        catch (MissingProbeAddressProvenanceException)
+        {
+            // A previous listing cannot be presented as complying with this prefix policy.
+            // Attempt both withdrawals even if one fails; support pages and private state remain.
+            var failures = new List<Exception>();
+            foreach (var name in new[] { "index.html", "latest.json" })
+            {
+                try { File.Delete(Path.Combine(publishedDirectory, name)); }
+                catch (DirectoryNotFoundException) { }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { failures.Add(ex); }
+            }
+            if (failures.Count > 0) throw new AggregateException("Cannot withdraw unsafe public listing.", failures);
+            throw;
+        }
         Directory.CreateDirectory(publishedDirectory);
         // Stage on the destination filesystem so replacement uses a rename, not a copy.
         var id = Guid.NewGuid().ToString("N");

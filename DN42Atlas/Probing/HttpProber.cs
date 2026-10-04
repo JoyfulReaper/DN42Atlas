@@ -47,16 +47,28 @@ public static class HttpProber
         IReadOnlyList<IPAddress> addresses,
         CancellationToken cancellationToken = default)
     {
+        return await ProbeApprovedAsync(domain, scheme, port, exclusionPolicy, addresses,
+            cancellationToken: cancellationToken);
+    }
+
+    internal static async Task<HttpProbeResult> ProbeApprovedAsync(
+        string domain, string scheme, int port, ExclusionPolicy exclusionPolicy,
+        IReadOnlyList<IPAddress> addresses,
+        Func<IPAddress[], int, CancellationToken, ValueTask<Stream>>? connect = null,
+        CancellationToken cancellationToken = default)
+    {
         var approvedAddresses = addresses.ToArray();
         if (!ProbeDestination.IsAllowed(exclusionPolicy, domain, approvedAddresses))
             throw new InvalidOperationException("Probe destination is excluded or outside DN42.");
 
-        using var client = new HttpClient(PinnedHttpConnection.CreateHandler(domain, approvedAddresses))
+        using var client = new HttpClient(PinnedHttpConnection.CreateHandler(domain, approvedAddresses, connect))
         {
             Timeout = TimeSpan.FromSeconds(10)
         };
 
-        return await ProbeAsync(domain, scheme, port, client, TimeSpan.FromSeconds(10), cancellationToken);
+        var result = await ProbeAsync(domain, scheme, port, client, TimeSpan.FromSeconds(10), cancellationToken);
+        result.ProbeAddresses = ProbeAddressProvenance.Normalize(approvedAddresses);
+        return result;
     }
 
     // Tests supply responses here; production always uses the policy-checked pinned transport above.

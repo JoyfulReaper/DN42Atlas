@@ -20,7 +20,7 @@ public sealed class PublishExistingTests
             {"GeneratedAt":"2026-10-03T12:50:26Z","ExcludedByHostname":2,"Results":[
               {"Domain":"manual.dn42","Scheme":"http","Port":80},
               {"Domain":"runtime.dn42","Scheme":"http","Port":80},
-              {"Domain":"good.dn42","Scheme":"http","Port":80,
+              {"Domain":"good.dn42","Scheme":"http","Port":80,"ProbeAddresses":["fd42:5678::1"],
                "Title":"manual.dn42 runtime.dn42 172.20.1.4 fd42:1234::1",
                "DiscoveredLinks":["http://runtime.dn42/","https://good.dn42/"],
                "Dn42Mentions":["manual.dn42","runtime.dn42","good.dn42"]}]}

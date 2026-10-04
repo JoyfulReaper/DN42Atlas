@@ -23,7 +23,14 @@ public static class AtlasReportGenerator
         // Validate before embedding it.
         //
         var publicScan = JsonNode.Parse(scanJson) ?? throw new InvalidDataException("Scan JSON must not be null.");
-        new PublicScanPolicy(exclusionPolicy).Apply(publicScan);
+        try { new PublicScanPolicy(exclusionPolicy).Apply(publicScan); }
+        catch (MissingProbeAddressProvenanceException)
+        {
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            if (!Path.GetFullPath(inputPath).Equals(Path.GetFullPath(outputPath), comparison))
+                File.Delete(outputPath);
+            throw;
+        }
 
         await File.WriteAllTextAsync(outputPath, GenerateHtml(publicScan), Encoding.UTF8, cancellationToken);
     }
