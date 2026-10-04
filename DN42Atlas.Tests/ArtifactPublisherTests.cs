@@ -42,7 +42,13 @@ public sealed class ArtifactPublisherTests
         Assert.Contains("AS4242420425", about);
         var optOut = await File.ReadAllTextAsync(Path.Combine(published, "opt-out.html"));
         Assert.Contains("Opt out of DN42Atlas", optOut);
-        Assert.Contains("https://github.com/JoyfulReaper/DN42Atlas/issues", optOut);
+        Assert.Contains("href=\"/operator\"", optOut);
+        Assert.Contains("href=\"/contact\"", optOut);
+        Assert.DoesNotContain("https://github.com/JoyfulReaper/DN42Atlas/issues", optOut);
+        Assert.DoesNotContain("not live yet", optOut);
+        Assert.Contains("2026-10-16", optOut);
+        Assert.Contains("href=\"/operator\"", about);
+        Assert.Contains("href=\"/contact\"", about);
         Assert.Contains("href=\"index.html\"", optOut);
         var robots = await File.ReadAllTextAsync(Path.Combine(published, "robots.txt"));
         Assert.AreEqual("User-agent: *\nAllow: /\n", robots.ReplaceLineEndings("\n"));

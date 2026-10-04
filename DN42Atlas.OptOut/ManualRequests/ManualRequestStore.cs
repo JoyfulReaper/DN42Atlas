@@ -6,6 +6,7 @@ using Microsoft.Data.Sqlite;
 namespace DN42Atlas.OptOut.ManualRequests;
 
 public enum ManualRequestType { OptOut, BroaderOrWildcard, OwnershipOrAuthentication, Correction, Other }
+public enum ManualRequestStatus { Pending, Reviewed, Resolved, Rejected }
 public sealed record ManualRequest(long Id, DateTimeOffset CreatedUtc, string Resource, string Contact,
     ManualRequestType RequestType, string Message, string Status, DateTimeOffset? ReviewedUtc);
 public sealed record RequestInput(string Resource, string Contact, ManualRequestType RequestType, string Message);
@@ -100,6 +101,36 @@ public sealed class ManualRequestStore(string path)
         command.Parameters.AddWithValue("$message", input.Message);
         var id = (long)(await command.ExecuteScalarAsync(token))!;
         return new(id, created, input.Resource, input.Contact, input.RequestType, input.Message, "Pending", null);
+    }
+
+    public async Task<bool> SetStatusAsync(long id, ManualRequestStatus status)
+    {
+        if (id <= 0) throw new ArgumentOutOfRangeException(nameof(id));
+        if (!Enum.IsDefined(status)) throw new ArgumentOutOfRangeException(nameof(status));
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE ManualRequests
+            SET Status = $status,
+                ReviewedUtc = CASE WHEN $status = 'Pending' THEN NULL
+                                   WHEN Status = 'Pending' THEN $now
+                                   ELSE ReviewedUtc END
+            WHERE Id = $id;
+            """;
+        command.Parameters.AddWithValue("$id", id);
+        command.Parameters.AddWithValue("$status", status.ToString());
+        command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+        return await command.ExecuteNonQueryAsync() == 1;
+    }
+
+    public async Task<bool> DeleteAsync(long id)
+    {
+        if (id <= 0) throw new ArgumentOutOfRangeException(nameof(id));
+        await using var connection = Open();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM ManualRequests WHERE Id = $id;";
+        command.Parameters.AddWithValue("$id", id);
+        return await command.ExecuteNonQueryAsync() == 1;
     }
 
     public async Task<IReadOnlyList<ManualRequest>> ReadAsync(long? id = null)

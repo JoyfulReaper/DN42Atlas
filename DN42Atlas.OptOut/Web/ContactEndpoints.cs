@@ -21,7 +21,8 @@ public static class ContactEndpoints
         var token = HtmlEncoder.Default.Encode(antiforgery.GetAndStoreTokens(context).RequestToken!);
         var notice = context.Request.Query["result"] == "recorded"
             ? "<p>Your request has been recorded for manual review. This is not an immediate exclusion.</p>" : "";
-        var types = string.Join("", Enum.GetNames<ManualRequestType>().Select(t => $"<option value=\"{t}\">{t}</option>"));
+        var types = string.Join("", Enum.GetValues<ManualRequestType>().Select(type =>
+            $"<option value=\"{type}\">{RequestTypeLabel(type)}</option>"));
         return Results.Content($$"""
             <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>DN42Atlas manual request</title>
             <style>:root { color-scheme: light dark; font-family: system-ui, sans-serif; } main { max-width: 48rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.55; } textarea { max-width: 100%; }</style></head>
@@ -38,6 +39,16 @@ public static class ContactEndpoints
             </main></body></html>
             """, "text/html; charset=utf-8");
     }
+
+    private static string RequestTypeLabel(ManualRequestType type) => type switch
+    {
+        ManualRequestType.OptOut => "Opt-out request",
+        ManualRequestType.BroaderOrWildcard => "Broader / wildcard exclusion",
+        ManualRequestType.OwnershipOrAuthentication => "Ownership or authentication problem",
+        ManualRequestType.Correction => "Correction",
+        ManualRequestType.Other => "Other",
+        _ => throw new ArgumentOutOfRangeException(nameof(type))
+    };
 
     public static async Task<IResult> PostAsync(HttpContext context, IAntiforgery antiforgery, ManualRequestStore store,
         ContactRateLimiter limiter, INtfyPublisher publisher, ILoggerFactory logs)

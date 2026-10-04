@@ -20,7 +20,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 var maintenanceCommand = args.FirstOrDefault();
 
-if (maintenanceCommand is "manual-requests-init" or "manual-requests" or "manual-request")
+if (maintenanceCommand is "manual-requests-init" or "manual-requests" or "manual-request" or
+    "manual-request-status" or "manual-request-delete")
 {
     try
     {

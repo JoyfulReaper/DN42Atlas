@@ -24,6 +24,7 @@
     <nav aria-label="Project information">
         <a href="about.html">About</a>
         <a href="opt-out.html">Opt out</a>
+        <a href="/contact">Manual request</a>
         <a href="https://github.com/JoyfulReaper/DN42Atlas">Source</a>
     </nav>
 
@@ -36,8 +37,8 @@
         <p>Public service listings will not be published before
             <time datetime="2026-10-16">October 16, 2026</time>.</p>
         <p>Operators can request complete exclusion during the preview period.
-            An authenticated DN42 self-service opt-out system is also being developed
-            during this period; it is not live yet.</p>
+            <a href="/operator">Authenticated self-service</a> and the
+            <a href="/contact">manual request form</a> are available now.</p>
     </section>
 
     <section>
@@ -53,12 +54,15 @@
         <ul>
             <li>the hostname or prefix will not be probed in future scans;</li>
             <li>it will not appear in published Atlas results;</li>
-            <li>once the self-service system is live, it will also be removed from
-                the currently published Atlas without waiting for another crawl.</li>
+            <li>exclusion updates re-filter the current Atlas artifacts without
+                waiting for another crawl.</li>
         </ul>
-        <p>During private preview, request exclusion by
-            <a href="https://github.com/JoyfulReaper/DN42Atlas/issues">opening a GitHub issue</a>.
-            Manual requests are reviewed and are not instantaneous.</p>
+        <p>Use <a href="/operator">authenticated self-service</a> for resources you
+            can authorize through Auth42. If self-service cannot handle your request,
+            including broader or wildcard exclusions, ownership/authentication problems,
+            corrections, or other concerns, <a href="/contact">submit a manual request</a>.
+            Manual requests require review and do not immediately create an exclusion.
+            See the <a href="opt-out.html">opt-out documentation</a> for details.</p>
     </section>
 
     <section>

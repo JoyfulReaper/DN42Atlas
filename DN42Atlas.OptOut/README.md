@@ -49,7 +49,7 @@ dotnet run --project DN42Atlas.OptOut -- manual-requests-init
 
 Supply these values through your deployment environment. Both paths must be absolute. The database must be outside the public root, separate from exclusion storage and other policy/state files; do not use filesystem aliases or links into the web root. Initialization refuses to overwrite any existing database. Startup validates existing storage and never creates a replacement for missing storage. New databases use owner read/write permissions (`0600`) on Unix; existing permissions and Windows ACLs are unchanged. Restrict access to the database and its directory to the service/operator accounts.
 
-The version-1 `ManualRequests` table records Id, CreatedUtc, Resource, Contact, RequestType, Message, Status, and nullable ReviewedUtc. New records are `Pending`; the schema also permits `Reviewed`, `Resolved`, and `Rejected` for future review work. No status mutation command is provided in this slice. Records and the full message remain private and are never serialized into public Atlas artifacts.
+The version-1 `ManualRequests` table records Id, CreatedUtc, Resource, Contact, RequestType, Message, Status, and nullable ReviewedUtc. New records are `Pending`; operators can change them to `Reviewed`, `Resolved`, or `Rejected`. Records and the full message remain private and are never serialized into public Atlas artifacts. Friendly labels in the contact form do not change the canonical request-type strings stored in SQLite.
 
 Web startup also requires the standard JoyfulReaperLib.Ntfy configuration, supplied through environment variables, for example:
 
@@ -69,9 +69,20 @@ Review requests locally, even when notifications are unavailable:
 ```text
 dotnet run --project DN42Atlas.OptOut -- manual-requests
 dotnet run --project DN42Atlas.OptOut -- manual-request <id>
+dotnet run --project DN42Atlas.OptOut -- manual-request-status <id> <Pending|Reviewed|Resolved|Rejected>
+dotnet run --project DN42Atlas.OptOut -- manual-request-delete <id>
 ```
 
-The first command lists pending request summaries; the second shows a selected record including its full message. These commands require only the request database and published-root settings, and run before OIDC, registry, or ntfy web startup validation. They do not approve requests or mutate exclusions.
+The first command lists pending request summaries without Message; the second shows a selected record including its full message and ReviewedUtc. Status names are exact and case-sensitive, and IDs must be positive integers. Invalid arguments return 2; nonexistent records return 1. Leaving Pending sets ReviewedUtc to the current UTC time. Subsequent changes between reviewed states preserve that timestamp; explicitly setting Pending clears it. Deletion permanently removes only the selected manual request. These commands require only the request database and published-root settings, and run before OIDC, registry, or ntfy web startup validation. Status changes and deletion never mutate exclusions, runtime policy, scan state, or public artifacts, and do not send notifications. No schema migration is needed.
+
+For interactive review on a Bash deployment, use the executable helper at the repository root:
+
+```bash
+./dn42atlas-request-admin
+./dn42atlas-request-admin /path/to/deployment.env
+```
+
+It loads `~/.config/dn42atlas/oidc.env` when present. Override that path with its optional argument or `DN42ATLAS_ADMIN_ENV_FILE`; an explicitly selected missing file is an error. Without a default file it uses the existing environment. The file is trusted shell configuration and is sourced with automatic export; keep it private and do not source untrusted files. Environment contents are not printed. The helper locates its repository directory, runs the OptOut CLI with `--no-launch-profile`, and requires Bash and the .NET SDK, not sqlite3. It offers pending list, detail, status selection, and deletion. Deletion shows the full request first and requires typing `DELETE` exactly. CLI failures are reported and return to the menu.
 
 Deployment must route `/contact` to this application over HTTPS; no proxy configuration is installed by Atlas. The bundled `opt-out.html` links to the form. Existing published support pages are intentionally preserved, so update an already-installed opt-out page manually to add the link. This does not publish crawl results or change the temporary landing page.
 
