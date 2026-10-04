@@ -52,6 +52,9 @@ public sealed class PublicScanPolicy(ExclusionPolicy exclusions)
                 root["ExcludedByHostname"] = previous + removedHosts.Count;
             if (removedPrefixHosts.Count > 0 && root["ExcludedByPrefix"] is JsonValue prefixCount && prefixCount.TryGetValue<int>(out var previousPrefix))
                 root["ExcludedByPrefix"] = previousPrefix + removedPrefixHosts.Count;
+            // Provenance is private raw-scan evidence. Strip it only after all row decisions succeed.
+            foreach (var result in results.OfType<JsonObject>())
+                result.Remove("ProbeAddresses");
         }
         Filter(scan);
     }

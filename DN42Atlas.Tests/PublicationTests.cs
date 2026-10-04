@@ -27,6 +27,7 @@ public sealed class PublicationTests
               ]
             }
             """)!;
+        var repeated = scan.DeepClone();
         new PublicScanPolicy(files.LoadPolicy()).Apply(scan);
         Assert.AreEqual(3, scan["ExcludedByHostname"]!.GetValue<int>());
         Assert.HasCount(1, scan["Results"]!.AsArray());
@@ -37,8 +38,8 @@ public sealed class PublicationTests
         foreach (var excluded in new[] { "BLOCKED.DN42", "child.private.dn42", "172.20.16.7", "fd42:1234", "*.private.dn42" })
             Assert.IsFalse(text.Contains(excluded, StringComparison.Ordinal));
         var once = text;
-        new PublicScanPolicy(files.LoadPolicy()).Apply(scan);
-        Assert.AreEqual(once, scan.ToJsonString());
+        new PublicScanPolicy(files.LoadPolicy()).Apply(repeated);
+        Assert.AreEqual(once, repeated.ToJsonString());
     }
 
     [TestMethod]

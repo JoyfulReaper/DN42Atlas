@@ -130,20 +130,48 @@ public sealed class PrefixPublicationTests
             ["ProbeAddresses"] = new JsonArray("fd42::1") });
         var raw = files.Write("scan.json", scan.ToJsonString());
         var original = File.ReadAllBytes(raw);
+        foreach (var row in JsonNode.Parse(original)!["Results"]!.AsArray())
+            Assert.IsTrue(row!.AsObject().ContainsKey("ProbeAddresses"));
         var published = Path.Combine(files.DirectoryPath, "published");
         var state = Path.Combine(files.DirectoryPath, "state.json");
         await ArtifactPublisher.PublishAsync(raw, published, files.LoadPolicy(), state);
+        Assert.DoesNotContain("ProbeAddresses", File.ReadAllText(Path.Combine(published, "latest.json")));
+        Assert.DoesNotContain("ProbeAddresses", File.ReadAllText(Path.Combine(published, "index.html")));
         File.WriteAllText(files.PrefixesPath, "172.20.220.48/28\nfdf0:e12c:5528::/48");
         Assert.AreEqual(0, await new RepublishCommand(files.LoadPolicy(), published, state).ExecuteAsync());
         var model = JsonNode.Parse(File.ReadAllText(Path.Combine(published, "latest.json")))!;
         Assert.HasCount(1, model["Results"]!.AsArray());
         Assert.AreEqual("keep.dn42", model["Results"]![0]!["Domain"]!.GetValue<string>());
+        Assert.IsFalse(model["Results"]![0]!.AsObject().ContainsKey("ProbeAddresses"));
+        Assert.DoesNotContain("ProbeAddresses", model.ToJsonString());
+        Assert.DoesNotContain("ProbeAddresses", File.ReadAllText(Path.Combine(published, "index.html")));
         Assert.AreEqual("2026-10-03T12:50:26Z", model["GeneratedAt"]!.GetValue<string>());
         Assert.IsTrue(JsonNode.DeepEquals(model, Embedded(File.ReadAllText(Path.Combine(published, "index.html")))));
         CollectionAssert.AreEqual(original, File.ReadAllBytes(raw));
         var report = files.Write("report.html", "old report");
         await AtlasReportGenerator.GenerateAsync(raw, report, files.LoadPolicy());
         Assert.IsTrue(JsonNode.DeepEquals(model, Embedded(File.ReadAllText(report))));
+    }
+
+    [TestMethod]
+    [DataRow("")]
+    [DataRow("other.dn42")]
+    public async Task PublicArtifactsStripProvenanceWithoutPrefixPolicy(string excludedHost)
+    {
+        using var files = new TestFiles(excludedHost);
+        var raw = files.Write("scan.json", Scan(new JsonArray("172.20.220.49", "fdf0:e12c:5528::1")).ToJsonString());
+        var original = File.ReadAllBytes(raw);
+        Assert.Contains("ProbeAddresses", Encoding.UTF8.GetString(original));
+        var published = Path.Combine(files.DirectoryPath, "published");
+        await ArtifactPublisher.PublishAsync(raw, published, files.LoadPolicy(), Path.Combine(files.DirectoryPath, "state.json"));
+        var json = File.ReadAllText(Path.Combine(published, "latest.json"));
+        var html = File.ReadAllText(Path.Combine(published, "index.html"));
+        var model = JsonNode.Parse(json)!;
+        Assert.HasCount(1, model["Results"]!.AsArray());
+        Assert.DoesNotContain("ProbeAddresses", json);
+        Assert.DoesNotContain("ProbeAddresses", html);
+        Assert.IsTrue(JsonNode.DeepEquals(model, Embedded(html)));
+        CollectionAssert.AreEqual(original, File.ReadAllBytes(raw));
     }
 
     [TestMethod]

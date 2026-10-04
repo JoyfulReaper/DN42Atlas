@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using DN42Atlas.Commands;
 using DN42Atlas.Probing;
 using DN42Atlas.Registry;
@@ -135,7 +136,12 @@ public sealed class CommandTests
             document.RootElement.GetProperty("ResolutionSource").GetString());
         Assert.IsTrue(File.Exists(Path.ChangeExtension(json, ".html")));
         var published = Path.Combine(files.DirectoryPath, "published");
-        Assert.AreEqual(await File.ReadAllTextAsync(json), await File.ReadAllTextAsync(Path.Combine(published, "latest.json")));
+        var rawModel = JsonNode.Parse(await File.ReadAllTextAsync(json))!;
+        var publicJson = await File.ReadAllTextAsync(Path.Combine(published, "latest.json"));
+        Assert.IsTrue(rawModel["Results"]![0]!.AsObject().ContainsKey("ProbeAddresses"));
+        Assert.DoesNotContain("ProbeAddresses", publicJson);
+        foreach (var result in rawModel["Results"]!.AsArray()) result!.AsObject().Remove("ProbeAddresses");
+        Assert.IsTrue(JsonNode.DeepEquals(rawModel, JsonNode.Parse(publicJson)));
         Assert.AreEqual(await File.ReadAllTextAsync(Path.ChangeExtension(json, ".html")),
             await File.ReadAllTextAsync(Path.Combine(published, "index.html")));
         Assert.IsTrue(File.Exists(Path.Combine(published, "about.html")));
