@@ -27,9 +27,10 @@ public static class OptOutPage
         IReadOnlyList<string> ipv6Prefixes,
         RegistrySnapshot snapshot,
         bool ownershipAvailable = true,
-        IReadOnlySet<ExactResource>? excluded = null,
+        IReadOnlySet<ExactResource>? selfService = null,
         string? requestToken = null,
-        string? result = null)
+        string? result = null,
+        IReadOnlySet<ExactResource>? manualExcluded = null)
     {
         var encoder = HtmlEncoder.Default;
         var content = new StringBuilder();
@@ -43,6 +44,7 @@ public static class OptOutPage
 
         AppendRegistryStatus(content, encoder, snapshot);
         if (result == "excluded") content.Append("<p>Exclusion recorded and public Atlas regenerated.</p>");
+        if (result == "included") content.Append("<p>Self-service exclusion revoked and public Atlas regenerated.</p>");
 
         if (!ownershipAvailable)
         {
@@ -56,7 +58,7 @@ public static class OptOutPage
                 content,
                 encoder,
                 domains,
-                "No matching registered .dn42 domains were found.", ExclusionResourceType.Domain, excluded,
+                "No matching registered .dn42 domains were found.", ExclusionResourceType.Domain, selfService, manualExcluded,
                 snapshot.IsSafeForAutomaticApproval, requestToken);
 
             content.Append("<h2>IPv4 prefixes you can manage</h2>");
@@ -64,7 +66,7 @@ public static class OptOutPage
                 content,
                 encoder,
                 ipv4Prefixes,
-                "No matching IPv4 allocations were found.", ExclusionResourceType.IPv4Prefix, excluded,
+                "No matching IPv4 allocations were found.", ExclusionResourceType.IPv4Prefix, selfService, manualExcluded,
                 snapshot.IsSafeForAutomaticApproval, requestToken);
 
             content.Append("<h2>IPv6 prefixes you can manage</h2>");
@@ -72,7 +74,7 @@ public static class OptOutPage
                 content,
                 encoder,
                 ipv6Prefixes,
-                "No matching IPv6 allocations were found.", ExclusionResourceType.IPv6Prefix, excluded,
+                "No matching IPv6 allocations were found.", ExclusionResourceType.IPv6Prefix, selfService, manualExcluded,
                 snapshot.IsSafeForAutomaticApproval, requestToken);
         }
 
@@ -153,7 +155,8 @@ public static class OptOutPage
         StringBuilder content,
         HtmlEncoder encoder,
         IReadOnlyList<string> values,
-        string emptyMessage, ExclusionResourceType type, IReadOnlySet<ExactResource>? excluded,
+        string emptyMessage, ExclusionResourceType type, IReadOnlySet<ExactResource>? selfService,
+        IReadOnlySet<ExactResource>? manualExcluded,
         bool fresh, string? token)
     {
         if (values.Count == 0)
@@ -170,15 +173,18 @@ public static class OptOutPage
         {
             content.Append("<li>");
             content.Append(encoder.Encode(value));
-            if (excluded?.Contains(new(type, value)) == true)
-                content.Append(" <strong>Excluded</strong>");
-            else if (fresh && !string.IsNullOrEmpty(token))
+            var manual = manualExcluded?.Contains(new(type, value)) == true;
+            var active = selfService?.Contains(new(type, value)) == true;
+            content.Append(manual ? " <strong>Excluded by operator policy</strong>" :
+                active ? " <strong>Excluded by self-service</strong>" : " <strong>Included</strong>");
+            if (!manual && fresh && !string.IsNullOrEmpty(token))
             {
                 content.Append("<form method=\"post\" action=\"/operator\">");
+                content.Append($"<input type=\"hidden\" name=\"intent\" value=\"{(active ? "confirm-include" : "confirm-exclude")}\">");
                 content.Append($"<input type=\"hidden\" name=\"resourceType\" value=\"{encoder.Encode(type.ToString())}\">");
                 content.Append($"<input type=\"hidden\" name=\"resourceValue\" value=\"{encoder.Encode(value)}\">");
                 content.Append($"<input type=\"hidden\" name=\"__RequestVerificationToken\" value=\"{encoder.Encode(token)}\">");
-                content.Append("<button type=\"submit\">Exclude from DN42Atlas</button></form>");
+                content.Append($"<button type=\"submit\">{(active ? "Include again" : "Exclude from DN42Atlas")}</button></form>");
             }
             content.Append("</li>");
         }
@@ -186,20 +192,40 @@ public static class OptOutPage
         content.Append("</ul>");
     }
 
+    public static string RenderConfirmation(string operation, ExactResource resource, string requestToken, string confirmationToken)
+    {
+        var encoder = HtmlEncoder.Default;
+        var include = operation == "include";
+        var content = $"<h1>{(include ? "Include" : "Exclude")} {encoder.Encode(resource.Value)} {(include ? "in DN42Atlas again" : "from DN42Atlas")}?</h1>";
+        content += include
+            ? "<p>The self-service exclusion will be revoked. The current Atlas will be regenerated from the recorded scan, so existing scan data may reappear immediately, and future Atlas scans may probe the resource again.</p>"
+            : "<p>This will prevent future Atlas probes covered by this resource and immediately remove/redact it from the currently published Atlas without another crawl.</p>";
+        content += "<form method=\"post\" action=\"/operator\">";
+        foreach (var field in new Dictionary<string, string> { ["intent"] = operation,
+            ["resourceType"] = resource.Type.ToString(), ["resourceValue"] = resource.Value,
+            ["__RequestVerificationToken"] = requestToken, ["confirmationToken"] = confirmationToken })
+            content += $"<input type=\"hidden\" name=\"{field.Key}\" value=\"{encoder.Encode(field.Value)}\">";
+        content += $"<button type=\"submit\">Confirm {(include ? "inclusion" : "exclusion")}</button></form><p><a href=\"/operator\">Cancel</a></p>";
+        return Layout("DN42Atlas confirmation", content);
+    }
+
     public static string RenderMutationStatus(MutationStatus status)
     {
         var message = status switch
         {
-            MutationStatus.InvalidRequest => "Invalid exclusion request. No exclusion was recorded.",
-            MutationStatus.NotAuthorized => "The current registry does not authorize this exact resource, or is not fresh. No exclusion was recorded.",
-            MutationStatus.NotRecorded => "The exclusion was not recorded. Please contact the operator.",
+            MutationStatus.Conflict => "This operation is no longer available, or an independent operator exclusion applies. Return to the dashboard to review current state.",
+            MutationStatus.InclusionRestored => "Inclusion failed. The original exclusion was restored and the public Atlas remains filtered. Please contact the operator.",
+            MutationStatus.InclusionUnavailable => "Inclusion recovery could not be confirmed. Crawling and the public listing are unavailable pending operator reconciliation.",
+            MutationStatus.InvalidRequest => "Invalid resource request. No change was made.",
+            MutationStatus.NotAuthorized => "The current registry does not authorize this exact resource, or is not fresh. No change was made.",
+            MutationStatus.NotRecorded => "The operation was not completed. Please contact the operator.",
             MutationStatus.RecordedRuntimeUnavailable => "Your exclusion has been recorded, but runtime policy reconciliation failed. Crawling and the public listing are unavailable pending reconciliation.",
             MutationStatus.RecordedPublicationWithdrawn => "Your exclusion has been recorded and future probing is blocked, but the public Atlas could not be regenerated and has been withdrawn pending reconciliation.",
-            MutationStatus.WithdrawalFailed => "Your exclusion has been recorded, but public withdrawal could not be completed. Operator intervention is required.",
+            MutationStatus.WithdrawalFailed => "The operation failed and policy or public withdrawal could not be completed. Immediate operator intervention is required.",
             MutationStatus.UncertainWithdrawalFailed => "The exclusion status could not be confirmed and public withdrawal could not be completed. Immediate operator intervention is required.",
             _ => "The exclusion status could not be confirmed. The public listing has been withdrawn pending operator reconciliation."
         };
-        return Layout("DN42Atlas exclusion status", $"<h1>Exclusion status</h1><p>{HtmlEncoder.Default.Encode(message)}</p><p><a href=\"/operator\">Back to operator dashboard</a></p>");
+        return Layout("DN42Atlas resource status", $"<h1>Resource status</h1><p>{HtmlEncoder.Default.Encode(message)}</p><p><a href=\"/operator\">Back to operator dashboard</a></p>");
     }
 
     private static string Layout(string title, string content)

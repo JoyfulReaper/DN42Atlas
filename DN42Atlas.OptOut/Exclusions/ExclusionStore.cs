@@ -212,6 +212,20 @@ public sealed class ExclusionStore(string databasePath)
         return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 
+    // Recovery is limited to the revocation timestamp written by this operation.
+    public async Task<bool> ReactivateAsync(long id, DateTimeOffset expectedRevokedUtc,
+        CancellationToken cancellationToken = default)
+    {
+        if (expectedRevokedUtc == default)
+            throw new ArgumentOutOfRangeException(nameof(expectedRevokedUtc));
+        await using var connection = OpenExisting();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE Exclusions SET RevokedUtc = NULL WHERE Id = $id AND RevokedUtc = $expected;";
+        command.Parameters.AddWithValue("$id", id);
+        command.Parameters.AddWithValue("$expected", FormatTimestamp(expectedRevokedUtc));
+        return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
+    }
+
     private SqliteConnection OpenExisting()
     {
         if (!File.Exists(databasePath) ||

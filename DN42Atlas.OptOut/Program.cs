@@ -121,6 +121,7 @@ builder.Services.AddSingleton(service => new RegistryResourceAuthorizer(
     service.GetRequiredService<RegistrySnapshotService>().GetSnapshot));
 builder.Services.AddSingleton<ExclusionReconciler>();
 builder.Services.AddSingleton<ExclusionMutationCoordinator>();
+builder.Services.AddSingleton<ConfirmationTokens>();
 builder.Services.AddAntiforgery(options =>
 {
     options.Cookie.Name = "__Host-DN42Atlas.Antiforgery";
@@ -131,10 +132,10 @@ builder.Services.AddAntiforgery(options =>
 });
 builder.Services.Configure<FormOptions>(options =>
 {
-    options.ValueCountLimit = 3;
+    options.ValueCountLimit = 5;
     options.KeyLengthLimit = 64;
-    options.ValueLengthLimit = 512;
-    options.BufferBodyLengthLimit = 4096;
+    options.ValueLengthLimit = 4096;
+    options.BufferBodyLengthLimit = 8192;
 });
 
 builder.Services

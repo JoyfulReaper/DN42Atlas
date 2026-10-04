@@ -229,6 +229,12 @@ public sealed class ExclusionPolicy
     }
 
 
+    public bool IsPrefixExcluded(string prefix)
+    {
+        var candidate = CidrRule.Parse(prefix);
+        return _prefixes.Any(rule => rule.Contains(candidate));
+    }
+
     private static IReadOnlyList<string>
         ReadRequiredRuleFile(
             string path)
@@ -377,6 +383,10 @@ public sealed class ExclusionPolicy
                 prefixLength);
         }
 
+
+        public bool Contains(CidrRule other) =>
+            _family == other._family && _prefixLength <= other._prefixLength &&
+            Contains(new IPAddress(other._networkBytes));
 
         public bool Contains(
             IPAddress address)

@@ -80,6 +80,7 @@ public sealed class ExclusionMutationTests
         builder.Services.AddSingleton(new RegistryResourceAuthorizer(fixture.Domains, fixture.Allocations, () => fixture.Snapshot));
         builder.Services.AddSingleton<ExclusionReconciler>();
         builder.Services.AddSingleton<ExclusionMutationCoordinator>();
+        builder.Services.AddSingleton<ConfirmationTokens>();
         builder.Services.AddDataProtection().UseEphemeralDataProtectionProvider();
         builder.Services.AddAntiforgery(options =>
         {
@@ -115,10 +116,21 @@ public sealed class ExclusionMutationTests
             Assert.Contains("no-store", page.Headers.CacheControl!.ToString());
             var cookie = page.Headers.GetValues("Set-Cookie").Single().Split(';')[0];
             client.DefaultRequestHeaders.Add("Cookie", cookie);
-            using var result = await client.PostAsync("/operator", new FormUrlEncodedContent(new Dictionary<string, string>
+            using var confirmation = await client.PostAsync("/operator", new FormUrlEncodedContent(new Dictionary<string, string>
             {
+                ["intent"] = "confirm-exclude",
                 ["resourceType"] = "Domain", ["resourceValue"] = "owned.dn42",
                 ["__RequestVerificationToken"] = System.Net.WebUtility.HtmlDecode(match.Groups[1].Value)
+            }));
+            Assert.AreEqual(System.Net.HttpStatusCode.OK, confirmation.StatusCode);
+            Assert.IsEmpty(await fixture.Store.GetActiveAsync());
+            html = await confirmation.Content.ReadAsStringAsync();
+            var protectedToken = System.Text.RegularExpressions.Regex.Match(html, "name=\"confirmationToken\" value=\"([^\"]+)\"");
+            using var result = await client.PostAsync("/operator", new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["intent"] = "exclude", ["resourceType"] = "Domain", ["resourceValue"] = "owned.dn42",
+                ["__RequestVerificationToken"] = System.Net.WebUtility.HtmlDecode(match.Groups[1].Value),
+                ["confirmationToken"] = System.Net.WebUtility.HtmlDecode(protectedToken.Groups[1].Value)
             }));
             Assert.AreEqual(System.Net.HttpStatusCode.Redirect, result.StatusCode);
             Assert.AreEqual("/operator?result=excluded", result.Headers.Location!.OriginalString);
@@ -135,7 +147,7 @@ public sealed class ExclusionMutationTests
     {
         using var fixture = await MutationFixture.CreateAsync();
         var original = await File.ReadAllBytesAsync(fixture.RawPath);
-        var context = fixture.PostContext(type, value);
+        var context = await fixture.ConfirmedPostAsync("exclude", type, value);
         var result = await OperatorEndpoints.PostAsync(context, fixture.Antiforgery, fixture.Coordinator);
         Assert.AreEqual("/operator?result=excluded", ((RedirectHttpResult)result).Url);
         Assert.Contains("no-store", context.Response.Headers.CacheControl.ToString());
@@ -417,8 +429,8 @@ public sealed class ExclusionMutationTests
         page = await OperatorEndpoints.GetAsync(fixture.Context(), fixture.Domains, fixture.Allocations,
             fixture.SnapshotService, fixture.Store, fixture.Paths, fixture.Antiforgery, fixture.Logs);
         html = ((ContentHttpResult)page).ResponseContent!;
-        Assert.Contains("owned.dn42 <strong>Excluded</strong>", html);
-        Assert.DoesNotContain("name=\"resourceValue\" value=\"owned.dn42\"", html);
+        Assert.Contains("owned.dn42 <strong>Excluded by self-service</strong>", html);
+        Assert.Contains("Include again", html);
     }
 
     [TestMethod]
@@ -543,6 +555,7 @@ internal sealed class MutationFixture : IDisposable
         await ArtifactPublisher.PublishAsync(f.RawPath, f.Paths.Published, f.Files.LoadPolicy(), f.Paths.State);
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton<ConfirmationTokens>();
         services.AddDataProtection().UseEphemeralDataProtectionProvider();
         services.AddAntiforgery(options =>
         {
@@ -556,11 +569,12 @@ internal sealed class MutationFixture : IDisposable
         return f;
     }
 
-    public ExclusionMutationCoordinator CreateCoordinator(Func<CancellationToken, Task>? materialize = null)
+    public ExclusionMutationCoordinator CreateCoordinator(Func<CancellationToken, Task>? materialize = null,
+        InclusionOperations? inclusionOperations = null)
     {
         var authorizer = new RegistryResourceAuthorizer(Domains, Allocations, () => Snapshot);
         var reconciler = new ExclusionReconciler(Store, Paths, NullLogger<ExclusionReconciler>.Instance, materialize);
-        return new(Store, authorizer, reconciler, Paths, NullLogger<ExclusionMutationCoordinator>.Instance);
+        return new(Store, authorizer, reconciler, Paths, NullLogger<ExclusionMutationCoordinator>.Instance, inclusionOperations);
     }
 
     public DefaultHttpContext Context()
@@ -571,19 +585,38 @@ internal sealed class MutationFixture : IDisposable
         return context;
     }
 
-    public DefaultHttpContext PostContext(string type, string value)
+    public DefaultHttpContext PostContext(string type, string value, string intent = "confirm-exclude",
+        string? confirmationToken = null, Auth42Identity? identity = null)
     {
         var get = Context();
+        if (identity != null) get.User = identity.ToPrincipal("test");
         var tokens = Antiforgery.GetAndStoreTokens(get);
         var post = Context();
+        if (identity != null) post.User = identity.ToPrincipal("test");
         post.Request.Method = "POST";
         post.Request.ContentType = "application/x-www-form-urlencoded";
         post.Request.Headers.Cookie = get.Response.Headers.SetCookie.ToString().Split(';')[0];
         post.Request.Form = new FormCollection(new Dictionary<string, StringValues>
         {
-            ["resourceType"] = type, ["resourceValue"] = value, ["__RequestVerificationToken"] = tokens.RequestToken!
+            ["resourceType"] = type, ["resourceValue"] = value, ["__RequestVerificationToken"] = tokens.RequestToken!,
+            ["intent"] = intent
         });
+        if (confirmationToken != null)
+            post.Request.Form = new FormCollection(post.Request.Form.ToDictionary(p => p.Key, p => p.Value)
+                .Append(new KeyValuePair<string, StringValues>("confirmationToken", confirmationToken)).ToDictionary(p => p.Key, p => p.Value));
         return post;
+    }
+
+    public async Task<DefaultHttpContext> ConfirmedPostAsync(string operation, string type, string value,
+        Auth42Identity? identity = null)
+    {
+        var first = PostContext(type, value, "confirm-" + operation, identity: identity);
+        var response = await OperatorEndpoints.PostAsync(first, Antiforgery, Coordinator);
+        var html = ((ContentHttpResult)response).ResponseContent!;
+        Assert.AreEqual(200, ((ContentHttpResult)response).StatusCode ?? 200);
+        var match = System.Text.RegularExpressions.Regex.Match(html, "name=\"confirmationToken\" value=\"([^\"]+)\"");
+        Assert.IsTrue(match.Success, html);
+        return PostContext(type, value, operation, System.Net.WebUtility.HtmlDecode(match.Groups[1].Value), identity);
     }
 
     public void AssertListingWithdrawn()
