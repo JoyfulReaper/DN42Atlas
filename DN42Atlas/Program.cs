@@ -11,7 +11,7 @@ if (command is "--help" or "-h" or "help")
     return 0;
 }
 
-if (command is not ("resolve" or "web-scan" or "report" or "probe-test" or "run" or "registry-update" or "republish"))
+if (command is not ("resolve" or "web-scan" or "report" or "probe-test" or "run" or "registry-update" or "republish" or "publish-existing"))
 {
     CommandUsage.Print();
     return 2;
@@ -19,6 +19,11 @@ if (command is not ("resolve" or "web-scan" or "report" or "probe-test" or "run"
 
 try
 {
+    if (command == "publish-existing" && args.Length != 2)
+    {
+        PublishExistingCommand.PrintUsage();
+        return 2;
+    }
     if (command == "registry-update")
         return await RegistryUpdateCommand.ExecuteAsync();
 
@@ -29,6 +34,9 @@ try
     if (command == "republish")
         return await new RepublishCommand(exclusionPolicy,
             Path.Combine(Environment.CurrentDirectory, "published"), PublicationState.ConfiguredPath).ExecuteAsync();
+    if (command == "publish-existing")
+        return await new PublishExistingCommand(exclusionPolicy,
+            Path.Combine(Environment.CurrentDirectory, "published"), PublicationState.ConfiguredPath).ExecuteAsync(args);
     var probeTargets = HttpProbeTargets.All;
     var resolve = new ResolveCommand(new RegistryResolver(exclusionPolicy));
     var webScan = new WebScanCommand(new WebScanner(exclusionPolicy, probeTargets), probeTargets, exclusionPolicy);

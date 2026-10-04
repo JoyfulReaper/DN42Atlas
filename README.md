@@ -226,6 +226,7 @@ dn42atlas probe-test                    Single-host HTTP/HTTPS probe test
 dn42atlas report <web-probe.json>        HTML viewer from existing scan JSON
 dn42atlas run                           Resolve, scan, generate HTML, publish stable files
 dn42atlas republish                     Rebuild current public artifacts without crawling
+dn42atlas publish-existing <web-probe.json> Publish a selected raw scan without crawling
 dn42atlas --help | -h | help             Show usage without scanning
 ```
 
@@ -267,7 +268,13 @@ Each successful `run` records which immutable raw scan backs the public artifact
 }
 ```
 
-State contains metadata only, including the absolute raw scan path and required SHA-256 hash. It is staged and flushed beside the private state file, then atomically replaced only after both public files have been replaced. It is not updated if public publication fails. Existing publications created before state tracking need one successful `run` to establish state; Atlas never guesses a source from filenames or modification times.
+State contains metadata only, including the absolute raw scan path and required SHA-256 hash. It is staged and flushed beside the private state file, then atomically replaced only after both public files have been replaced. It is not updated if public publication fails. Existing publications created before state tracking can use `publish-existing` to establish state without another crawl; Atlas never guesses a source from filenames or modification times.
+
+```bash
+dotnet run --project DN42Atlas -- publish-existing results/web-probe-20261003-125026.json
+```
+
+`publish-existing` requires exactly one existing raw scan path. It explicitly selects that file, preserves its bytes, applies the current manual and configured runtime exclusions through the same public generator as `run`, and updates `published/latest.json`, `published/index.html`, and the configured private publication state. It performs no DNS, registry resolution, HTTP probing, or crawling. It can bootstrap missing state or intentionally replace the current selection; it does not bypass exclusions. Missing arguments or extra arguments return usage error 2; a missing file or invalid policy fails without replacing public artifacts. Subsequent `republish` commands use this recorded selection and verify its hash.
 
 ```bash
 dotnet run --project DN42Atlas -- republish

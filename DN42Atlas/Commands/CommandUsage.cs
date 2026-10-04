@@ -12,6 +12,7 @@ public static class CommandUsage
         Console.WriteLine("  run                             Resolve, scan, generate HTML, and publish stable files");
         Console.WriteLine("  registry-update                 Safely refresh the configured local registry checkout");
         Console.WriteLine("  republish                       Rebuild current public artifacts without crawling");
+        Console.WriteLine("  publish-existing <web-probe.json> Publish an explicitly selected raw scan without crawling");
         Console.WriteLine("  --help, -h, help                 Show this usage");
     }
 }
