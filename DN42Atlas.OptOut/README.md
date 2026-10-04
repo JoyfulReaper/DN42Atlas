@@ -84,7 +84,17 @@ For interactive review on a Bash deployment, use the executable helper at the re
 
 It loads `~/.config/dn42atlas/oidc.env` when present. Override that path with its optional argument or `DN42ATLAS_ADMIN_ENV_FILE`; an explicitly selected missing file is an error. Without a default file it uses the existing environment. The file is trusted shell configuration and is sourced with automatic export; keep it private and do not source untrusted files. Environment contents are not printed. The helper locates its repository directory, runs the OptOut CLI with `--no-launch-profile`, and requires Bash and the .NET SDK, not sqlite3. It offers pending list, detail, status selection, and deletion. Deletion shows the full request first and requires typing `DELETE` exactly. CLI failures are reported and return to the menu.
 
-Deployment must route `/contact` to this application over HTTPS; no proxy configuration is installed by Atlas. The bundled `opt-out.html` links to the form. Existing published support pages are intentionally preserved, so update an already-installed opt-out page manually to add the link. This does not publish crawl results or change the temporary landing page.
+The current preview source pages already link to `/operator` and `/contact`. Deployment routes `/contact` to this application over HTTPS; Atlas does not install proxy configuration. Separately, generated `published/` support pages are intentionally preserved on republish; older installed copies may need updating. The preview site remains separate from generated listings until no earlier than October 16, 2026.
+
+## Persistent deployment
+
+The deployed systemd service runs `/usr/bin/dotnet /opt/dn42atlas-optout/current/DN42Atlas.OptOut.dll`, with OptOut listening on `127.0.0.1:5078` behind nginx. These are deployment settings; the source does not hard-code the listening address or include the unit/nginx configuration. Keep private database, policy, publication-state, registry and service-account Data Protection key paths persistent across releases. ASP.NET Core uses its default Data Protection configuration; ensure the account's persistent home/key directory is available and protected. Do not place secrets or private state inside release directories or served roots.
+
+From a clean non-root deployment checkout, run `./deploy-optout.sh`. It pulls `--ff-only`, updates pinned submodules, publishes Release into `/opt/dn42atlas-optout/releases/<timestamp>-<sha>`, atomically replaces the `current` symlink, restarts the installed service, and verifies its active state. If no service is installed it skips restart. It does not source the OIDC env file or alter nginx, the systemd unit, or static preview content.
+
+After successful activation and the service check, retention keeps current plus the three newest other completed releases. `DN42ATLAS_OPTOUT_RETAIN_PREVIOUS=0` keeps current only; the default is `3`. Values must be non-negative integers. Current is explicitly preserved even when it is older than other releases. Only direct real directories matching the script's release naming convention are eligible; hidden temps, symlinks and unrelated files/directories are ignored. Pruning failure returns nonzero with a clear error, while leaving the newly active deployment in place. Failed publish/activation cleans only this deployment's temporary directory/link; failed restart does not prune and does not automatically restore the old current symlink.
+
+See [the architecture guide](../docs/ARCHITECTURE.md) for deployment boundaries, layout and recovery. Source edits affect the served source preview when those pages are the web root, but OptOut binary changes require deployment. No public listing launch is performed by this script.
 
 ## Registry freshness
 

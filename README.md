@@ -8,6 +8,8 @@ It can also turn a scan result into a self-contained HTML viewer for casually fl
 
 This is primarily a hobby project for exploring DN42 and learning more about routing, service discovery, and the weird little corners of private networks.
 
+The site remains in private preview. Public service listings will not launch before **October 16, 2026**. Authenticated self-service at `/operator` and manual requests at `/contact` are live; the OptOut application runs persistently under systemd. The crawler can generate artifacts independently of this launch gate, so keep generated listings separate from the served preview site until an explicit launch decision.
+
 ## What It Does
 
 DN42Atlas currently has three main stages:
@@ -99,7 +101,9 @@ The public scan JSON records `ExcludedByHostname` and `ExcludedByPrefix` counts,
 
 `robots.txt` controls HTTP page-content fetching. Atlas still requests `/robots.txt` and can record the origin and robots status when homepage fetching is disallowed. Complete exclusion removes the target from the scan entirely, before those HTTP requests.
 
-`probe-test` also checks hostname exclusions before DNS and validates the entire resolved address set before probing. Future raw scan results include `ProbeAddresses`, a string array containing the complete approved/pinned destination set at scan time, including for failed probes. Addresses are normalized, deduplicated, and ordered with an ordinal string comparison; IPv4-mapped IPv6 normalizes to IPv4 consistently with exclusion matching. This is historical provenance, not the single address that happened to connect or live DNS state. Existing DN42 destination validation remains unchanged.
+Authenticated self-service supports exact registered domains and IPv4/IPv6 allocations owned by the active Auth42 maintainer. Auth42 establishes identity; the local registry's `mnt-by` determines authority. Stale, dirty, or unknown registry snapshots disable automatic mutations. Approved exclusions update the private audit database, runtime bundle, and current filtered artifacts without another crawl. **Include again** revokes a self-service exclusion and regenerates from the recorded raw scan; manual policy always wins. Broader/wildcard requests and ownership problems belong in the manual form. See the [OptOut guide](DN42Atlas.OptOut/README.md) for confirmations, recovery and configuration.
+
+`probe-test` also checks hostname exclusions before DNS and validates the entire resolved address set before probing. Raw web scan results include `ProbeAddresses`, a string array containing the complete approved/pinned destination set at scan time, including for failed probes. Addresses are normalized, deduplicated, and ordered with an ordinal string comparison; IPv4-mapped IPv6 normalizes to IPv4 consistently with exclusion matching. This is historical provenance, not the single address that happened to connect or live DNS state.
 
 `report` and public generation remove an entire service result when its hostname is excluded or any recorded `ProbeAddresses` address matches an excluded prefix. Both IPv4 and IPv6 CIDRs are supported; address families must match after IPv4-mapped normalization. After filtering decisions, `ProbeAddresses` is removed from every retained result: it stays private in the raw scan and is not emitted in public JSON or embedded HTML models. References in retained results are also filtered/redacted. No DNS lookup or probe is performed during publication or reporting, and source bytes and scan timestamps remain unchanged. Public artifacts omit this evidence and cannot substitute for the immutable raw scan when re-filtering under prefix policy.
 
@@ -158,67 +162,14 @@ The pinned `external/JoyfulReaperLib` submodule supplies only its ntfy project t
 From the repository root:
 
 ```bash
-dotnet build DN42Atlas/DN42Atlas.csproj
+dotnet build DN42Atlas.slnx
 ```
 
 ## Architecture and Tests
 
-The project is split by responsibility:
+The crawler separates command handling, registry/DNS work, scanning, pinned networking, HTTP probing, policy filtering, reporting, and publishing. `DN42Atlas.OptOut` owns Auth42 authentication, exact-resource authorization, exclusion reconciliation, manual requests, and server-rendered endpoints.
 
-```text
-DN42Atlas/
-  Program.cs
-  Commands/
-    ResolveCommand.cs
-    WebScanCommand.cs
-    ProbeTestCommand.cs
-    ReportCommand.cs
-    RunCommand.cs
-    CommandUsage.cs
-  Scanning/
-    RegistryResolver.cs
-    RegistryResolutionResult.cs
-    WebScanner.cs
-    WebScanResult.cs
-  Networking/
-    Dn42AddressSpace.cs
-    ProbeDestination.cs
-    PinnedHttpConnection.cs
-  Probing/
-    HttpProber.cs
-    HttpProbeTargets.cs
-  Policy/
-    ExclusionPolicy.cs
-    PublicScanPolicy.cs
-  Registry/
-    DomainParser.cs
-    DomainObject.cs
-    DomainResolution.cs
-    HttpProbeResult.cs
-  Reporting/
-    AtlasReportGenerator.cs
-  Publishing/
-    ArtifactPublisher.cs
-    PublicArtifactGenerator.cs
-    PublicationState.cs
-DN42Atlas.Tests/
-DN42Atlas.OptOut/
-  ManualRequests/
-  Web/ContactEndpoints.cs
-external/JoyfulReaperLib/
-config/
-  excluded-hosts.txt
-  excluded-prefixes.txt
-```
-
-`Program.cs` loads the required exclusion policy and shared HTTP target list, then dispatches commands. Commands handle CLI arguments, output files, report generation, and summaries. `RegistryResolver` parses registry objects and resolves DNS; `WebScanner` filters saved resolutions and coordinates HTTP probes with concurrency limited to 32. Their result records carry data back to the commands without changing the public JSON schema. `Dn42AddressSpace` holds the address guard.
-
-`Probing/HttpProber.cs`, `Policy/ExclusionPolicy.cs`, the registry models/parser,
-and `Reporting/AtlasReportGenerator.cs` retain their existing responsibilities.
-Networking also validates probe destinations and pins HTTP connections; `PublicScanPolicy` filters public metadata and report inputs.
-Both exclusion files remain required for every operational command. Registry hostname
-exclusions run before DNS; saved-resolution hostname exclusions, prefix exclusions,
-and the DN42 address guard run before web probing.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the component boundaries, trust model, persistent state, failure behavior, and deployment flow.
 
 Run the automated tests from the repository root:
 
@@ -230,7 +181,53 @@ Tests use temporary fixtures, fake DNS/probe functions, HTTP responses, and in-m
 or external services. MSTest is used only by the test project; CIDR matching uses
 the existing implementation without additional networking packages.
 
-The OptOut application also serves an anonymous `/contact` form for manual requests. Authenticated self-service remains preferred; manual submissions are private pending records and never automatically change exclusions or publication. Notifications use JoyfulReaperLib.Ntfy after saving the request and completing the response. Local `manual-requests` and `manual-request <id>` commands support review without a web records endpoint. See [OptOut configuration and deployment](DN42Atlas.OptOut/README.md#manual-requests-and-notifications) for private database initialization, ntfy environment settings, form limits, and deployment steps. The bundled opt-out page links to the form; existing installed support pages need that link added manually.
+## Manual Requests
+
+The anonymous `/contact` form is the normal manual-review fallback for broader/wildcard requests, ownership or authentication problems, corrections, and other concerns. Authenticated self-service remains preferred. A submission stores resource, contact, request type, message, timestamp, and status in a separate private SQLite database; it never automatically changes exclusions or publication.
+
+After durable persistence and a successful response, JoyfulReaperLib.Ntfy attempts a best-effort notification containing type, resource, contact, and request ID. It omits the full free-form message. Notification failure preserves success and the database record. There is no durable notification retry queue; review pending records even when ntfy is unavailable. The contact limiter is a process-local global limit of ten POST attempts per minute.
+
+Private review commands belong to the **OptOut executable**, not the crawler:
+
+```text
+dotnet run --project DN42Atlas.OptOut -- manual-requests
+dotnet run --project DN42Atlas.OptOut -- manual-request <id>
+dotnet run --project DN42Atlas.OptOut -- manual-request-status <id> <Pending|Reviewed|Resolved|Rejected>
+dotnet run --project DN42Atlas.OptOut -- manual-request-delete <id>
+```
+
+The list omits Message; detail includes it. Leaving Pending sets ReviewedUtc, changing between reviewed states preserves it, and returning to Pending clears it. Deletion affects only the selected manual request. No unauthenticated HTTP records endpoint exists.
+
+`./dn42atlas-request-admin [env-file]` offers the same operations interactively and requires exact `DELETE` confirmation after showing a request. It sources trusted deployment configuration from `~/.config/dn42atlas/oidc.env` when present; its argument or `DN42ATLAS_ADMIN_ENV_FILE` overrides that path. See [OptOut configuration](DN42Atlas.OptOut/README.md#manual-requests-and-notifications) for database initialization and the standard `Ntfy__ServerUrl`, `Ntfy__Topic`, `Ntfy__AccessToken`, and `Ntfy__Timeout` settings. Keep secrets out of source control.
+
+## Deployment and Private Preview
+
+The deployed OptOut service uses systemd to run:
+
+```text
+/usr/bin/dotnet /opt/dn42atlas-optout/current/DN42Atlas.OptOut.dll
+```
+
+`./deploy-optout.sh` refuses a dirty checkout, pulls with `--ff-only`, synchronizes pinned submodules, and publishes Release output into `/opt/dn42atlas-optout/releases/<UTC-timestamp>-<sha>`. It atomically switches `current`, restarts `dn42atlas-optout.service` when installed, and checks that it is active. Only then does it prune completed releases: current plus the three newest other releases by default. Set `DN42ATLAS_OPTOUT_RETAIN_PREVIOUS` to a non-negative integer to change the number of other releases retained; zero keeps current only. Failed publishing or service restart does not prune. This active-state check is not an HTTP health probe. Source edits alone do not update the running binary; deploy them.
+
+The existing deployment binds OptOut to `127.0.0.1:5078`. nginx serves static content and proxies only `/operator`, `/login`, `/logout`, `/signin-oidc`, and `/contact`. The listener address, nginx rules, and systemd unit are deployment configuration, not installed or hard-coded by the application. Keep the service account's Data Protection keys persistent across releases.
+
+| Location | Purpose |
+| --- | --- |
+| `/opt/DN42Atlas` | Source checkout, config, CLI and deployment helpers |
+| `DN42Atlas/site/` | Source preview pages served during the launch gate; already linked to live support routes |
+| `results/` | Private historical raw scans and adjacent reports; never serve this directory |
+| `published/` | Generated/derived listing and support artifacts, separate from the current preview root |
+| `/var/lib/dn42atlas/registry` | Private dedicated registry authorization checkout |
+| `/var/lib/dn42atlas/exclusions.db` | Private exclusion audit records |
+| `/var/lib/dn42atlas/manual-requests.db` | Private manual request records |
+| `/var/lib/dn42atlas/runtime-exclusions.json` | Private active exclusion policy consumed by crawler/report commands |
+| `/var/lib/dn42atlas/publication-state.json` | Private exact raw-scan selection and SHA-256 |
+| `~/.config/dn42atlas/oidc.env` | Secret deployment configuration |
+
+Paths above describe the production layout conceptually; use the configured absolute paths for your deployment. Crawler commands still use working-directory defaults for `results/`, `published/`, and manual policy files. In particular, crawler resolution currently reads `~/dn42-registry/data/dns`; the configured registry path controls OptOut authorization and `registry-update`, not that default resolver path.
+
+The preview source pages already link to `/operator` and `/contact`. Separately, the publisher preserves already-installed support pages; updating those derived copies is an operator decision. Do not switch nginx to generated listings before the no-earlier-than **October 16, 2026** launch gate. Deployment does not make that switch or schedule crawls.
 
 ## Commands
 
@@ -245,6 +242,7 @@ dn42atlas report <web-probe.json>        HTML viewer from existing scan JSON
 dn42atlas run                           Resolve, scan, generate HTML, publish stable files
 dn42atlas republish                     Rebuild current public artifacts without crawling
 dn42atlas publish-existing <web-probe.json> Publish a selected raw scan without crawling
+dn42atlas registry-update               Update the configured dedicated registry snapshot
 dn42atlas --help | -h | help             Show usage without scanning
 ```
 
@@ -258,7 +256,7 @@ Unknown commands print usage and exit with code 2. Missing report arguments also
 dotnet run --project DN42Atlas -- run
 ```
 
-`run` resolves the registry into `domain-resolution.json`, passes that exact file to `web-scan`, and generates the corresponding HTML viewer through the existing web-scan report stage. It retains the timestamped JSON and HTML in `results/`, then copies the completed artifacts into stable output paths:
+`run` resolves the registry into `domain-resolution.json`, passes that exact file to `web-scan`, and generates the corresponding HTML viewer through the existing web-scan report stage. It retains the timestamped JSON and HTML in `results/`, then generates filtered stable artifacts:
 
 ```text
 published/
@@ -269,7 +267,7 @@ published/
   robots.txt
 ```
 
-`published/` is the production static web root. Its `index.html` and `latest.json` contain the current public artifact; `results/` holds timestamped historical data and is separate from this web root.
+`published/` is the derived static output root intended for the public Atlas. Its `index.html` and `latest.json` contain the current filtered artifact; `results/` holds private timestamped historical data. The current served preview uses source pages instead; generating output is not authorization to launch it.
 
 Public generation reads the raw scan into a fresh in-memory JSON model and applies the current `PublicScanPolicy` exactly once. Both `latest.json` and the HTML's embedded scan are serialized from that same filtered/redacted model. The original raw JSON remains unchanged. HTML serialization retains its safe default encoder so scan content cannot close the embedded script.
 
@@ -306,7 +304,7 @@ The application owns and updates only the generated `index.html` and `latest.jso
 
 Generated files are staged in `published/`, flushed and closed, then individually replaced by same-directory atomic renames. Bundled support files use the same staging process but are installed without replacing existing files. Generation or staging failures leave the previous generated files intact. The two generated-file replacements are not a single transaction: a crash or replacement failure between them can leave JSON and HTML from different runs. The HTML viewer is self-contained and does not load `latest.json`.
 
-The command stops and returns nonzero if a stage fails. Standalone `web-scan` and `report` keep their existing outputs and do not update `published/`. No web-server configuration, deployment, or scheduling is performed; a server may be configured separately to serve this directory. Temporary staging filenames begin with a dot and end in `.tmp`; servers should not expose these files.
+The command stops and returns nonzero if a stage fails. Standalone `web-scan` and `report` keep their existing outputs and do not update `published/`. Crawler commands do not configure a web server, deploy OptOut, or schedule work. Temporary staging filenames begin with a dot and end in `.tmp`; servers should not expose these files.
 
 For unattended execution, set the working directory explicitly: exclusion files, relative input paths, `domain-resolution.json`, `results/`, and `published/` depend on it. The registry is read from `~/dn42-registry/data/dns` for the account running Atlas. Commands currently have no pipeline-wide cancellation support. Resolution output overwrites its fixed filename; scan filenames use local start time to the second, so concurrent runs can collide. Run one pipeline at a time. Historical artifact writes are unchanged; only the stable published files use atomic replacement.
 
@@ -519,7 +517,6 @@ Planned or possible future work includes:
 - QOTD probing
 - scan profiles such as `core`, `extended`, and `all`
 - comparing scan history over time
-- hosted Atlas UI
 - richer topology and relationship visualization
 
 Any future recursive discovery should continue to use conservative limits and respect the policy of the destination service.
@@ -573,6 +570,8 @@ than:
 ## Status
 
 Very experimental.
+
+The crawler, authenticated self-service, reversible exclusions, manual request management, and persistent OptOut deployment are implemented. Public service listings remain gated until no earlier than October 16, 2026. See the [architecture guide](docs/ARCHITECTURE.md#known-limitations--future-work) for operational limitations.
 
 Expect:
 

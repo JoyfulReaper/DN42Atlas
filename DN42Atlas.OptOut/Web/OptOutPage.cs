@@ -244,6 +244,7 @@ public static class OptOutPage
               </style>
             </head>
             <body>
+            <p><a href="/">← Back to DN42Atlas</a></p>
             {{content}}
             </body>
             </html>
