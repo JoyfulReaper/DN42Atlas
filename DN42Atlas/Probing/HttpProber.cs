@@ -110,17 +110,31 @@ public static class HttpProber
 
             AddAtlasHeaders(request);
 
-            using var response =
+            using var initialResponse =
                 await client.SendAsync(
                     request,
                     HttpCompletionOption.ResponseHeadersRead,
                     deadline.Token);
 
+            robotsRedirect =
+                initialResponse.Headers.Location?.ToString();
+
+            using var redirectRequest = GetRobotsRedirect(robotsUri, initialResponse) is { } redirectUri
+                ? new HttpRequestMessage(HttpMethod.Get, redirectUri)
+                : null;
+            if (redirectRequest != null)
+            {
+                initialResponse.Dispose();
+                AddAtlasHeaders(redirectRequest);
+            }
+
+            // Reuse the pinned transport and the original deadline; never follow another redirect.
+            using var redirectedResponse = redirectRequest == null ? null :
+                await client.SendAsync(redirectRequest, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
+            var response = redirectedResponse ?? initialResponse;
+
             robotsStatusCode =
                 (int)response.StatusCode;
-
-            robotsRedirect =
-                response.Headers.Location?.ToString();
 
             if (response.IsSuccessStatusCode)
             {
@@ -366,6 +380,19 @@ public static class HttpProber
                     ex.Message
             };
         }
+    }
+
+    private static Uri? GetRobotsRedirect(Uri originalUri, HttpResponseMessage response)
+    {
+        if (response.StatusCode is not (HttpStatusCode.MovedPermanently or HttpStatusCode.Redirect or
+            HttpStatusCode.SeeOther or HttpStatusCode.TemporaryRedirect or HttpStatusCode.PermanentRedirect) ||
+            response.Headers.Location is not { } location ||
+            !Uri.TryCreate(originalUri, location, out var target) ||
+            (target.Scheme != Uri.UriSchemeHttp && target.Scheme != Uri.UriSchemeHttps) ||
+            !string.Equals(target.Host, originalUri.Host, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        return target;
     }
 
     private static void AddAtlasHeaders(

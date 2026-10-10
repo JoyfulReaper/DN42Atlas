@@ -93,6 +93,35 @@ public sealed class ProbeSafetyTests
     }
 
     [TestMethod]
+    public async Task ProductionRobotsRedirectReusesApprovedAddressesWithoutDns()
+    {
+        using var files = new TestFiles();
+        IPAddress[] addresses = [IPAddress.Parse("fd42::1")];
+        var approved = addresses.ToArray();
+        var streams = new List<DuplexStream>();
+        var result = await HttpProber.ProbeApprovedAsync("no-dns-required.dn42", "http", 8080,
+            files.LoadPolicy(), addresses, (destinations, port, _) =>
+            {
+                CollectionAssert.AreEqual(approved, destinations);
+                Assert.AreEqual(streams.Count == 0 ? 8080 : 8081, port);
+                addresses[0] = IPAddress.Parse("192.0.2.1");
+                var body = "User-agent: *\nDisallow: /\n";
+                var response = streams.Count == 0
+                    ? "HTTP/1.1 302 Found\r\nLocation: http://no-dns-required.dn42:8081/rules.txt\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    : $"HTTP/1.1 200 OK\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n{body}";
+                var stream = new DuplexStream(response);
+                streams.Add(stream);
+                return ValueTask.FromResult<Stream>(stream);
+            });
+        Assert.AreEqual(RobotsStatus.Disallowed, result.Robots);
+        Assert.HasCount(2, streams);
+        Assert.Contains("GET /robots.txt HTTP/1.1", streams[0].Requests);
+        Assert.Contains("Host: no-dns-required.dn42:8080", streams[0].Requests);
+        Assert.Contains("GET /rules.txt HTTP/1.1", streams[1].Requests);
+        Assert.Contains("Host: no-dns-required.dn42:8081", streams[1].Requests);
+    }
+
+    [TestMethod]
     public async Task PinnedTransportRejectsUnexpectedRequestHostBeforeConnection()
     {
         using var handler = PinnedHttpConnection.CreateHandler("good.dn42", [IPAddress.Parse("fd42::1")],
