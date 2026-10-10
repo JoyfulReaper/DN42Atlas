@@ -212,7 +212,7 @@ public sealed class OperationLockTests
         var timer = File.ReadAllText(Path.Combine(root, "deployment", "systemd", "dn42atlas-run.timer"));
         foreach (var directive in new[] { "Type=oneshot", "User=joyfulreaper", "Group=joyfulreaper", "WorkingDirectory=/opt/DN42Atlas",
             "Environment=HOME=/home/joyfulreaper", "EnvironmentFile=/home/joyfulreaper/.config/dn42atlas/crawler.env",
-            "TimeoutStartSec=45min", "NoNewPrivileges=true", "PrivateTmp=true", "--no-launch-profile -- run" })
+            "TimeoutStartSec=3h", "NoNewPrivileges=true", "PrivateTmp=true", "--no-launch-profile -- run" })
             Assert.Contains(directive, service);
         Assert.DoesNotContain("oidc.env", service);
         Assert.DoesNotContain("nginx", service);

@@ -12,9 +12,8 @@ public sealed class ProbeTestCommand(
     Func<string, Task<IPAddress[]>>? resolveAsync = null,
     Func<string, string, int, CancellationToken, Task<HttpProbeResult>>? probeAsync = null)
 {
-    public async Task ExecuteAsync()
+    public async Task ExecuteAsync(string hostname = "burble.dn42")
     {
-        const string hostname = "burble.dn42";
         if (exclusionPolicy.IsHostExcluded(hostname))
         {
             Console.WriteLine("Probe-test skipped: host is excluded.");

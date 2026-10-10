@@ -50,7 +50,8 @@ try
         case "report":
             return await ReportCommand.ExecuteAsync(args, exclusionPolicy);
         case "probe-test":
-            await new ProbeTestCommand(probeTargets, exclusionPolicy).ExecuteAsync();
+            await new ProbeTestCommand(probeTargets, exclusionPolicy)
+                .ExecuteAsync(args.ElementAtOrDefault(1) ?? "burble.dn42");
             return 0;
         case "web-scan":
             return await webScan.ExecuteAsync(args) != null ? 0 : 1;
