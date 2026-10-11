@@ -91,10 +91,10 @@ public static class HttpProber
         var robotsUri =
             new Uri(origin, "robots.txt");
 
-        RobotsStatus robotsStatus;
-        int? robotsStatusCode;
-        bool? robotsAllowed;
-        string? robotsRedirect;
+        var robotsStatus = RobotsStatus.Unavailable;
+        int? robotsStatusCode = null;
+        bool? robotsAllowed = null;
+        string? robotsRedirect = null;
 
         //
         // robots.txt first.
@@ -115,6 +115,9 @@ public static class HttpProber
                     request,
                     HttpCompletionOption.ResponseHeadersRead,
                     deadline.Token);
+
+            robotsStatusCode =
+                (int)initialResponse.StatusCode;
 
             robotsRedirect =
                 initialResponse.Headers.Location?.ToString();
@@ -185,7 +188,16 @@ public static class HttpProber
                 Reachable = false,
 
                 Robots =
-                    RobotsStatus.Unavailable,
+                    robotsStatus,
+
+                RobotsStatusCode =
+                    robotsStatusCode,
+
+                RobotsAllowed =
+                    robotsAllowed,
+
+                RedirectLocation =
+                    robotsRedirect,
 
                 Error = ex.Message
             };

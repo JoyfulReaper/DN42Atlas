@@ -227,6 +227,31 @@ public sealed class HttpProberTests
         Assert.IsNotNull(robots ? result.Error : result.HomepageError);
     }
 
+
+    [TestMethod]
+    public async Task RedirectedRobotsRequestFailurePreservesInitialResponseMetadata()
+    {
+        var requests = new List<string>();
+        using var client = CreateClient(requests, path =>
+        {
+            if (path == "/robots.txt")
+                return Redirect(HttpStatusCode.PermanentRedirect, "https://good.dn42/rules.txt");
+
+            throw new HttpRequestException("Simulated TLS failure.");
+        }, absoluteUris: true);
+
+        var result = await Probe(client);
+
+        Assert.IsFalse(result.Reachable);
+        Assert.AreEqual(RobotsStatus.Unavailable, result.Robots);
+        Assert.AreEqual(308, result.RobotsStatusCode);
+        Assert.IsNull(result.RobotsAllowed);
+        Assert.AreEqual("https://good.dn42/rules.txt", result.RedirectLocation);
+        Assert.AreEqual("Simulated TLS failure.", result.Error);
+        CollectionAssert.AreEqual(
+            new[] { "http://good.dn42/robots.txt", "https://good.dn42/rules.txt" }, requests);
+    }
+
     private static Task<HttpProbeResult> Probe(HttpClient client, TimeSpan? timeout = null) =>
         HttpProber.ProbeAsync("good.dn42", "http", 80, client, timeout ?? TimeSpan.FromSeconds(5));
 
