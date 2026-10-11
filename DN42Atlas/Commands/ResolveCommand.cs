@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using DN42Atlas.Registry;
 using DN42Atlas.Scanning;
@@ -27,7 +28,10 @@ public sealed class ResolveCommand(RegistryResolver resolver, string? registryDi
     {
         var registryPath = GetRegistryDirectory(registryDirectory);
 
+        var timer = Stopwatch.StartNew();
         var scan = await resolver.ResolveAsync(registryPath);
+        timer.Stop();
+
         var resolutions = scan.Resolutions;
         var resolved =
             resolutions.Count(
@@ -74,6 +78,10 @@ public sealed class ResolveCommand(RegistryResolver resolver, string? registryDi
         Console.WriteLine(
             $"Errors:            " +
             $"{errors}");
+
+        Console.WriteLine(
+            $"DNS duration:      " +
+            $"{timer.Elapsed}");
 
         var resolutionOutputPath =
             Path.Combine(
