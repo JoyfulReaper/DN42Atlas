@@ -1,27 +1,25 @@
 using System.Globalization;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using DN42Atlas.Policy;
+using DN42Atlas.Registry;
 
 namespace DN42Atlas.Reporting;
 
 public static class AtlasReportGenerator
 {
+    private static readonly string Template = LoadTemplate();
+
     public static async Task GenerateAsync(
         string inputPath,
         string outputPath,
         ExclusionPolicy exclusionPolicy,
         CancellationToken cancellationToken = default)
     {
-        var scanJson =
-            await File.ReadAllTextAsync(
-                inputPath,
-                cancellationToken);
-
-        //
-        // Validate before embedding it.
-        //
+        var scanJson = await File.ReadAllTextAsync(inputPath, cancellationToken);
         var publicScan = JsonNode.Parse(scanJson) ?? throw new InvalidDataException("Scan JSON must not be null.");
         try { new PublicScanPolicy(exclusionPolicy).Apply(publicScan); }
         catch (MissingProbeAddressProvenanceException)
@@ -35,990 +33,248 @@ public static class AtlasReportGenerator
         await File.WriteAllTextAsync(outputPath, GenerateHtml(publicScan), Encoding.UTF8, cancellationToken);
     }
 
-    // The caller owns policy filtering; serialization still uses the safe default encoder.
+    // The caller owns policy filtering. Render only explicit public fields; never use raw provenance.
     public static string GenerateHtml(JsonNode publicScan)
     {
-
-        var lastScanHtml = string.Empty;
-        if (publicScan["GeneratedAt"] is JsonValue generatedAtValue &&
-            generatedAtValue.TryGetValue<string>(out var generatedAtText) &&
-            DateTimeOffset.TryParse(
-                generatedAtText,
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.RoundtripKind,
-                out var generatedAt))
+        var entries = (publicScan["Results"] as JsonArray ?? [])
+            .OfType<JsonObject>().Select(CreateEntry)
+            .OrderBy(entry => entry.Origin, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(entry => entry.Id, StringComparer.Ordinal).ToArray();
+        var seeds = entries.Select(entry => NormalizeHost(entry.Domain)).ToHashSet(StringComparer.Ordinal);
+        var entriesByHost = entries.GroupBy(entry => NormalizeHost(entry.Domain))
+            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
+        var allLinks = new HashSet<string>(StringComparer.Ordinal);
+        var discovered = new SortedDictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        foreach (var entry in entries)
         {
-            var generatedAtUtc = generatedAt.ToUniversalTime();
-            var machineTimestamp = WebUtility.HtmlEncode(
-                generatedAtUtc.ToString("O", CultureInfo.InvariantCulture));
-            var displayTimestamp = WebUtility.HtmlEncode(
-                generatedAtUtc.ToString(
-                    "yyyy-MM-dd HH:mm:ss 'UTC'",
-                    CultureInfo.InvariantCulture));
-
-            lastScanHtml =
-                $"<p class=\"last-scan\">Last scan: <time datetime=\"{machineTimestamp}\">{displayTimestamp}</time></p>";
-        }
-
-        // Safe JSON serialization prevents string values from closing the HTML script element.
-        var scanJson = publicScan.ToJsonString();
-
-        var html = $$"""
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-
-<title>DN42Atlas</title>
-
-<style>
-    :root {
-        color-scheme: dark;
-        font-family:
-            ui-monospace,
-            SFMono-Regular,
-            Menlo,
-            Monaco,
-            Consolas,
-            monospace;
-    }
-
-    body {
-        margin: 0;
-        background: #0d1117;
-        color: #c9d1d9;
-    }
-
-    header {
-        padding: 1rem 1.5rem;
-        border-bottom: 1px solid #30363d;
-        background: #161b22;
-    }
-
-    h1 {
-        margin: 0;
-        font-size: 1.4rem;
-    }
-
-    .subtitle {
-        margin-top: .4rem;
-        color: #8b949e;
-    }
-
-    .site-nav,
-    .footer-links {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 1rem;
-    }
-
-    .site-nav {
-        margin-top: .75rem;
-    }
-
-    main {
-        max-width: 1200px;
-        margin: 0 auto;
-        padding: 1.5rem;
-    }
-
-    .stats {
-        display: grid;
-        grid-template-columns:
-            repeat(auto-fit, minmax(150px, 1fr));
-        gap: .75rem;
-        margin-bottom: 1rem;
-    }
-
-    .stat,
-    .card {
-        background: #161b22;
-        border: 1px solid #30363d;
-        border-radius: 8px;
-        padding: 1rem;
-    }
-
-    .stat-value {
-        font-size: 1.5rem;
-        font-weight: bold;
-        color: #58a6ff;
-    }
-
-    .stat-label {
-        color: #8b949e;
-        font-size: .85rem;
-    }
-
-    .controls {
-        display: flex;
-        flex-wrap: wrap;
-        gap: .5rem;
-        align-items: center;
-        margin: 1rem 0;
-    }
-
-    button,
-    input {
-        font: inherit;
-        color: #c9d1d9;
-        background: #21262d;
-        border: 1px solid #30363d;
-        border-radius: 6px;
-        padding: .55rem .75rem;
-    }
-
-    button {
-        cursor: pointer;
-    }
-
-    button:hover {
-        background: #30363d;
-    }
-
-    input {
-        flex: 1;
-        min-width: 240px;
-    }
-
-    a {
-        color: #58a6ff;
-    }
-
-    .origin {
-        font-size: 1.15rem;
-        margin-bottom: .5rem;
-        word-break: break-all;
-    }
-
-    .title {
-        font-size: 1.4rem;
-        margin: .5rem 0 1rem 0;
-    }
-
-    .meta {
-        display: flex;
-        flex-wrap: wrap;
-        gap: .5rem;
-        margin-bottom: 1rem;
-    }
-
-    .badge {
-        display: inline-block;
-        padding: .2rem .45rem;
-        border-radius: 5px;
-        background: #21262d;
-        border: 1px solid #30363d;
-        font-size: .8rem;
-    }
-
-    .good {
-        color: #3fb950;
-    }
-
-    .warn {
-        color: #d29922;
-    }
-
-    .bad {
-        color: #f85149;
-    }
-
-    details {
-        margin-top: 1rem;
-    }
-
-    summary {
-        cursor: pointer;
-        font-weight: bold;
-    }
-
-    ul {
-        padding-left: 1.5rem;
-    }
-
-    li {
-        margin: .3rem 0;
-        word-break: break-all;
-    }
-
-    .dn42 {
-        color: #3fb950;
-    }
-
-    .clearnet {
-        color: #d29922;
-    }
-
-    .gopher,
-    .gemini {
-        color: #bc8cff;
-    }
-
-    .muted {
-        color: #8b949e;
-    }
-
-    .counter {
-        margin-left: auto;
-        color: #8b949e;
-    }
-
-    .discovered-hosts {
-        margin-top: 1rem;
-    }
-
-    .host-row {
-        padding: .5rem 0;
-        border-bottom: 1px solid #21262d;
-    }
-
-    .host-row:last-child {
-        border-bottom: 0;
-    }
-
-    .new-host {
-        color: #3fb950;
-        font-weight: bold;
-    }
-
-    .footer {
-        color: #8b949e;
-        margin-top: 2rem;
-        text-align: center;
-    }
-
-    .footer p {
-        margin: .65rem 0;
-    }
-
-    .footer-links {
-        justify-content: center;
-    }
-
-    .last-scan,
-    .hosting-note {
-        font-size: .85rem;
-    }
-</style>
-</head>
-
-<body>
-
-<header>
-    <h1>DN42Atlas</h1>
-
-    <div class="subtitle">
-        A polite map of public stuff on DN42.
-    </div>
-
-    <nav
-        class="site-nav"
-        aria-label="Project information">
-        <a href="/about.html">About</a>
-        <a href="/opt-out.html">Opt out</a>
-        <a href="https://github.com/JoyfulReaper/DN42Atlas">Source</a>
-    </nav>
-</header>
-
-<main>
-
-<div class="stats">
-    <div class="stat">
-        <div
-            class="stat-value"
-            id="seedCount">
-            -
-        </div>
-        <div class="stat-label">
-            seed domains
-        </div>
-    </div>
-
-    <div class="stat">
-        <div
-            class="stat-value"
-            id="originCount">
-            -
-        </div>
-        <div class="stat-label">
-            browseable origins
-        </div>
-    </div>
-
-    <div class="stat">
-        <div
-            class="stat-value"
-            id="linkCount">
-            -
-        </div>
-        <div class="stat-label">
-            unique links
-        </div>
-    </div>
-
-    <div class="stat">
-        <div
-            class="stat-value"
-            id="hostCount">
-            -
-        </div>
-        <div class="stat-label">
-            discovered DN42 hosts
-        </div>
-    </div>
-
-    <div class="stat">
-        <div
-            class="stat-value"
-            id="newHostCount">
-            -
-        </div>
-        <div class="stat-label">
-            hosts outside seed set
-        </div>
-    </div>
-</div>
-
-<div class="controls">
-    <button id="previous">
-        ← Previous
-    </button>
-
-    <button id="random">
-        Random
-    </button>
-
-    <button id="next">
-        Next →
-    </button>
-
-    <input
-        id="search"
-        type="search"
-        placeholder="Filter hostname or title...">
-
-    <span
-        class="counter"
-        id="counter">
-    </span>
-</div>
-
-<section
-    class="card"
-    id="viewer">
-</section>
-
-<section
-    class="card discovered-hosts">
-
-    <details>
-        <summary>
-            Newly discovered DN42 hosts
-        </summary>
-
-        <div id="newHosts">
-        </div>
-    </details>
-
-</section>
-
-<footer class="footer">
-    <p>
-        DN42Atlas does not automatically follow discovered links.
-    </p>
-
-    {{lastScanHtml}}
-
-    <nav
-        class="footer-links"
-        aria-label="Project information">
-        <span>AS4242420425</span>
-        <a href="/about.html">About</a>
-        <a href="/opt-out.html">Opt out</a>
-        <a href="https://github.com/JoyfulReaper/DN42Atlas">Source</a>
-    </nav>
-
-    <p class="hosting-note">
-        Hosted on
-        <a
-            href="https://greencloudvps.com/billing/aff.php?aff=10295"
-            target="_blank"
-            rel="sponsored noopener noreferrer">GreenCloud VPS</a>.
-        Affiliate link — I may earn a commission if you sign up.
-    </p>
-</footer>
-
-</main>
-
-<script>
-const scan = {{scanJson}};
-
-const robotsNames = [
-    "NotChecked",
-    "NoRules",
-    "Allowed",
-    "Disallowed",
-    "Unavailable"
-];
-
-const allResults =
-    Array.isArray(scan.Results)
-        ? scan.Results
-        : [];
-
-function originFor(result) {
-    if (result.Scheme !== "http" && result.Scheme !== "https")
-        return "#";
-
-    const defaultPort =
-        (result.Scheme === "http" &&
-         result.Port === 80) ||
-        (result.Scheme === "https" &&
-         result.Port === 443);
-
-    return (
-        result.Scheme +
-        "://" +
-        result.Domain +
-        (defaultPort
-            ? ""
-            : ":" + result.Port) +
-        "/"
-    );
-}
-
-function escapeHtml(value) {
-    return String(value ?? "")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#39;");
-}
-
-function classifyLink(value) {
-    try {
-        const url =
-            new URL(value);
-
-        if (url.protocol === "gopher:")
-            return "gopher";
-
-        if (url.protocol === "gemini:")
-            return "gemini";
-
-        if (
-            url.hostname
-                .toLowerCase()
-                .endsWith(".dn42"))
-        {
-            return "dn42";
-        }
-
-        return "clearnet";
-    }
-    catch {
-        return "clearnet";
-    }
-}
-
-const seeds =
-    new Set(
-        allResults
-            .map(x =>
-                String(x.Domain ?? "")
-                    .toLowerCase())
-            .filter(Boolean)
-    );
-
-const browseable =
-    allResults
-        .filter(x =>
-            x.Reachable === true &&
-            x.StatusCode !== null)
-        .sort((a, b) =>
-            originFor(a)
-                .localeCompare(
-                    originFor(b)));
-
-const allLinks =
-    new Set();
-
-const discoveredHosts =
-    new Map();
-
-function addHost(
-    host,
-    source,
-    discoveryType)
-{
-    host =
-        String(host ?? "")
-            .toLowerCase();
-
-    if (!host.endsWith(".dn42"))
-        return;
-
-    if (!discoveredHosts.has(host)) {
-        discoveredHosts.set(
-            host,
+            foreach (var link in Strings(entry.Result, "DiscoveredLinks"))
             {
-                host,
-                sources: new Set(),
-                types: new Set()
-            });
-    }
-
-    const item =
-        discoveredHosts.get(host);
-
-    item.sources.add(source);
-    item.types.add(discoveryType);
-}
-
-for (const result of allResults) {
-    const source =
-        originFor(result);
-
-    for (
-        const link of
-        result.DiscoveredLinks ?? [])
-    {
-        allLinks.add(link);
-
-        try {
-            const url =
-                new URL(link);
-
-            addHost(
-                url.hostname,
-                source,
-                "link");
-        }
-        catch {
-        }
-    }
-
-    for (
-        const mention of
-        result.Dn42Mentions ?? [])
-    {
-        addHost(
-            mention,
-            source,
-            "mention");
-    }
-}
-
-const newlyDiscovered =
-    Array.from(
-        discoveredHosts.values())
-    .filter(x =>
-        !seeds.has(x.host))
-    .sort((a, b) =>
-        a.host.localeCompare(b.host));
-
-document
-    .getElementById("seedCount")
-    .textContent =
-        seeds.size;
-
-document
-    .getElementById("originCount")
-    .textContent =
-        browseable.length;
-
-document
-    .getElementById("linkCount")
-    .textContent =
-        allLinks.size;
-
-document
-    .getElementById("hostCount")
-    .textContent =
-        discoveredHosts.size;
-
-document
-    .getElementById("newHostCount")
-    .textContent =
-        newlyDiscovered.length;
-
-const newHostsContainer =
-    document.getElementById(
-        "newHosts");
-
-newHostsContainer.innerHTML =
-    newlyDiscovered.length === 0
-        ? `<p class="muted">None.</p>`
-        : newlyDiscovered
-            .map(item => {
-                const sources =
-                    Array.from(
-                        item.sources)
-                    .slice(0, 10);
-
-                return `
-                    <div class="host-row">
-                        <div class="new-host">
-                            ${escapeHtml(item.host)}
-                        </div>
-
-                        <div class="muted">
-                            discovered from
-                            ${item.sources.size}
-                            origin(s)
-                        </div>
-
-                        <details>
-                            <summary>
-                                sources
-                            </summary>
-
-                            <ul>
-                                ${sources
-                                    .map(source => `
-                                        <li>
-                                            ${escapeHtml(source)}
-                                        </li>
-                                    `)
-                                    .join("")}
-                            </ul>
-                        </details>
-                    </div>
-                `;
-            })
-            .join("");
-
-let filtered =
-    [...browseable];
-
-let currentIndex = 0;
-
-const search =
-    document.getElementById(
-        "search");
-
-function applyFilter() {
-    const value =
-        search.value
-            .trim()
-            .toLowerCase();
-
-    filtered =
-        browseable.filter(result => {
-            if (!value)
-                return true;
-
-            return (
-                String(
-                    result.Domain ?? "")
-                    .toLowerCase()
-                    .includes(value) ||
-
-                String(
-                    result.Title ?? "")
-                    .toLowerCase()
-                    .includes(value) ||
-
-                String(
-                    result.ContentType ?? "")
-                    .toLowerCase()
-                    .includes(value)
-            );
-        });
-
-    currentIndex = 0;
-
-    render();
-}
-
-function render() {
-    const viewer =
-        document.getElementById(
-            "viewer");
-
-    const counter =
-        document.getElementById(
-            "counter");
-
-    if (filtered.length === 0) {
-        counter.textContent = "0 / 0";
-
-        viewer.innerHTML =
-            `<p>No matching origins.</p>`;
-
-        return;
-    }
-
-    if (currentIndex < 0)
-        currentIndex =
-            filtered.length - 1;
-
-    if (
-        currentIndex >=
-        filtered.length)
-    {
-        currentIndex = 0;
-    }
-
-    const result =
-        filtered[currentIndex];
-
-    const origin =
-        originFor(result);
-
-    counter.textContent =
-        `${currentIndex + 1} / ${filtered.length}`;
-
-    const links =
-        result.DiscoveredLinks ?? [];
-
-    const mentions =
-        result.Dn42Mentions ?? [];
-
-    const statusClass =
-        result.StatusCode >= 200 &&
-        result.StatusCode < 400
-            ? "good"
-            : result.StatusCode >= 400
-                ? "warn"
-                : "";
-
-    const linkHtml =
-        links.length === 0
-            ? `<p class="muted">No links discovered.</p>`
-            : `
-                <ul>
-                    ${links
-                        .map(link => {
-                            const kind =
-                                classifyLink(link);
-
-                            return `
-                                <li>
-                                    <span
-                                        class="badge ${kind}">
-                                        ${escapeHtml(kind)}
-                                    </span>
-
-                                    <a
-                                        href="${escapeHtml(link)}"
-                                        target="_blank"
-                                        rel="noopener noreferrer">
-                                        ${escapeHtml(link)}
-                                    </a>
-                                </li>
-                            `;
-                        })
-                        .join("")}
-                </ul>
-            `;
-
-    const mentionHtml =
-        mentions.length === 0
-            ? `<p class="muted">No DN42 names mentioned.</p>`
-            : `
-                <ul>
-                    ${mentions
-                        .map(host => `
-                            <li class="dn42">
-                                ${escapeHtml(host)}
-                            </li>
-                        `)
-                        .join("")}
-                </ul>
-            `;
-
-    viewer.innerHTML = `
-        <div class="origin">
-            <a
-                href="${escapeHtml(origin)}"
-                target="_blank"
-                rel="noopener noreferrer">
-                ${escapeHtml(origin)}
-            </a>
-        </div>
-
-        <div class="title">
-            ${escapeHtml(
-                result.Title ||
-                "(no title)")}
-        </div>
-
-        <div class="meta">
-
-            <span class="badge ${statusClass}">
-                HTTP
-                ${escapeHtml(result.StatusCode)}
-            </span>
-
-            <span class="badge">
-                ${escapeHtml(
-                    result.ContentType ||
-                    "unknown content type")}
-            </span>
-
-            <span class="badge">
-                robots:
-                ${escapeHtml(
-                    robotsNames[
-                        result.Robots
-                    ] ??
-                    result.Robots)}
-            </span>
-
-            <span class="badge">
-                ${links.length}
-                links
-                ${result.LinksTruncated
-                    ? "+"
-                    : ""}
-            </span>
-
-            <span class="badge">
-                ${mentions.length}
-                DN42 mentions
-                ${result.Dn42MentionsTruncated
-                    ? "+"
-                    : ""}
-            </span>
-
-        </div>
-
-        ${
-            result.HomepageRedirectLocation
-                ? `
-                    <p>
-                        <strong>Redirect:</strong>
-                        ${escapeHtml(
-                            result.HomepageRedirectLocation)}
-                    </p>
-                `
-                : ""
+                allLinks.Add(link);
+                if (SafeLink(link, out var uri)) AddHost(uri!.IdnHost, entry.Origin);
+            }
+            foreach (var host in Strings(entry.Result, "Dn42Mentions")) AddHost(host, entry.Origin);
         }
 
-        ${
-            result.HomepageError
-                ? `
-                    <p class="bad">
-                        Homepage error:
-                        ${escapeHtml(
-                            result.HomepageError)}
-                    </p>
-                `
-                : ""
-        }
-
-        ${
-            result.ContentTruncated
-                ? `
-                    <p class="warn">
-                        Homepage body was truncated
-                        during discovery.
-                    </p>
-                `
-                : ""
-        }
-
-        <details>
-            <summary>
-                Discovered links
-                (${links.length}${result.LinksTruncated ? "+" : ""})
-            </summary>
-
-            ${linkHtml}
-        </details>
-
-        <details>
-            <summary>
-                DN42 mentions
-                (${mentions.length}${result.Dn42MentionsTruncated ? "+" : ""})
-            </summary>
-
-            ${mentionHtml}
-        </details>
-    `;
-}
-
-document
-    .getElementById("previous")
-    .addEventListener(
-        "click",
-        () => {
-            currentIndex--;
-            render();
-        });
-
-document
-    .getElementById("next")
-    .addEventListener(
-        "click",
-        () => {
-            currentIndex++;
-            render();
-        });
-
-document
-    .getElementById("random")
-    .addEventListener(
-        "click",
-        () => {
-            if (filtered.length === 0)
-                return;
-
-            currentIndex =
-                Math.floor(
-                    Math.random() *
-                    filtered.length);
-
-            render();
-        });
-
-search.addEventListener(
-    "input",
-    applyFilter);
-
-document.addEventListener(
-    "keydown",
-    event => {
-        if (
-            document.activeElement ===
-            search)
+        void AddHost(string host, string source)
         {
-            return;
+            host = NormalizeHost(host);
+            if (!host.EndsWith(".dn42", StringComparison.Ordinal)) return;
+            if (!discovered.TryGetValue(host, out var sources)) discovered[host] = sources = [];
+            sources.Add(source);
         }
 
-        if (event.key === "ArrowLeft") {
-            currentIndex--;
-            render();
+        var outside = discovered.Where(pair => !seeds.Contains(pair.Key)).ToArray();
+        var summary = new StringBuilder();
+        Stat(summary, entries.Length, "public service results");
+        Stat(summary, entries.Count(entry => Flag(entry.Result, "Reachable")), "reachable public origins");
+        Stat(summary, seeds.Count, "public seed domains");
+        Stat(summary, allLinks.Count, "unique discovered links");
+        Stat(summary, discovered.Count, "discovered DN42 hosts");
+        Stat(summary, outside.Length, "hosts outside seed set");
+        // Historical scan totals can include rows removed by later exclusions; label them accordingly.
+        OptionalStat(summary, publicScan, "ResolvedDomainsProbed", "domains probed at scan time");
+        OptionalStat(summary, publicScan, "ProbeTargetCount", "probes at scan time");
+        OptionalStat(summary, publicScan, "ExcludedByHostname", "domains excluded by hostname");
+        OptionalStat(summary, publicScan, "ExcludedByPrefix", "domains excluded by prefix");
+
+        var scanTimes = new StringBuilder();
+        if (Timestamp(publicScan, "StartedAt") is { } started)
+            scanTimes.Append($"<p>Scan started: {TimeHtml(started)}</p>");
+        if (Timestamp(publicScan, "FinishedAt") is { } finished)
+            scanTimes.Append($"<p>Scan finished: {TimeHtml(finished)}</p>");
+        var duration = Number(publicScan, "DurationSeconds");
+        if (duration == null && Timestamp(publicScan, "StartedAt") is { } start &&
+            Timestamp(publicScan, "FinishedAt") is { } end && end >= start)
+            duration = (end - start).TotalSeconds;
+        if (duration is >= 0)
+            scanTimes.Append($"<p>Scan duration: {E(duration.Value.ToString("0.##", CultureInfo.InvariantCulture))} seconds</p>");
+
+        var rows = new StringBuilder();
+        var details = new StringBuilder();
+        foreach (var entry in entries)
+        {
+            var result = entry.Result;
+            var title = Text(result, "Title");
+            if (string.IsNullOrWhiteSpace(title)) title = "(no title)";
+            var robots = RobotsName(result);
+            var searchable = $"{entry.Domain} {entry.Origin} {title} {Text(result, "ContentType")}";
+            rows.Append($"""
+                <tr data-service="{entry.Id}" data-search="{E(searchable)}" data-scheme="{E(entry.Scheme)}" data-robots="{E(robots)}" data-reachable="{(Flag(result, "Reachable") ? "true" : "false")}">
+                    <th scope="row"><a href="#{entry.Id}">{E(entry.Origin)}</a></th>
+                    <td>{E(title)}</td><td>{E(entry.Scheme.ToUpperInvariant())} / {entry.Port}</td>
+                    <td>{E(ServiceStatus(result))}<br><span class="muted">robots: {E(robots)}</span></td>
+                </tr>
+                """);
+            details.Append($"""
+                <article class="card service-detail" id="{entry.Id}" tabindex="-1" aria-labelledby="title-{entry.Id}">
+                    <p class="origin">{OriginHtml(entry)}</p>
+                    <h3 id="title-{entry.Id}">{E(title)}</h3>
+                    <div class="meta"><span class="badge">{E(ServiceStatus(result))}</span>
+                    <span class="badge">{E(entry.Scheme.ToUpperInvariant())} / {entry.Port}</span>
+                    <span class="badge">{E(Text(result, "ContentType") ?? "unknown content type")}</span>
+                    <span class="badge">robots: {E(robots)}</span></div>
+                """);
+            Field(details, result, "RobotsStatusCode", "robots.txt HTTP status");
+            Field(details, result, "RobotsAllowed", "Homepage allowed by robots");
+            Field(details, result, "RedirectLocation", "robots.txt redirect");
+            Field(details, result, "HomepageRedirectLocation", "Homepage redirect");
+            Field(details, result, "HomepageError", "Homepage error");
+            Field(details, result, "Error", "Probe error");
+            if (Flag(result, "ContentTruncated")) details.Append("<p class=\"warn\">Homepage body was truncated during discovery.</p>");
+            var links = Strings(result, "DiscoveredLinks");
+            details.Append($"<details><summary>Discovered links ({links.Length}{(Flag(result, "LinksTruncated") ? "+" : "")})</summary>");
+            if (links.Length == 0) details.Append("<p class=\"muted\">No links discovered.</p>");
+            else
+            {
+                details.Append("<ul>");
+                foreach (var link in links)
+                {
+                    var safe = SafeLink(link, out var uri);
+                    var kind = uri?.Scheme is "gopher" or "gemini" ? uri.Scheme :
+                        uri?.IdnHost.EndsWith(".dn42", StringComparison.OrdinalIgnoreCase) == true ? "dn42" : "clearnet";
+                    details.Append($"<li><span class=\"badge {kind}\">{kind}</span> ");
+                    details.Append(safe ? ExternalLink(link, link) : E(link));
+                    details.Append("</li>");
+                }
+                details.Append("</ul>");
+            }
+            details.Append("</details>");
+            var mentions = Strings(result, "Dn42Mentions");
+            details.Append($"<details><summary>DN42 mentions ({mentions.Length}{(Flag(result, "Dn42MentionsTruncated") ? "+" : "")})</summary>");
+            if (mentions.Length == 0) details.Append("<p class=\"muted\">No DN42 names mentioned.</p>");
+            else
+            {
+                details.Append("<ul>");
+                foreach (var host in mentions) details.Append($"<li>{HostHtml(host, entriesByHost)}</li>");
+                details.Append("</ul>");
+            }
+            details.Append("</details><p><a href=\"#directory\">Back to directory</a></p></article>");
         }
 
-        if (event.key === "ArrowRight") {
-            currentIndex++;
-            render();
+        var hostsHtml = new StringBuilder();
+        HostGroup(hostsHtml, "Discovered hosts outside seed set", outside, entriesByHost);
+        // These hosts already have scan results, so offer direct navigation to their services.
+        HostGroup(hostsHtml, "Discovered hosts in seed set", discovered.Where(pair => seeds.Contains(pair.Key)).ToArray(), entriesByHost);
+        var values = new Dictionary<string, string>
+        {
+            ["summary"] = summary.ToString(), ["scanTimes"] = scanTimes.ToString(),
+            ["rows"] = rows.ToString(), ["details"] = details.ToString(), ["hosts"] = hostsHtml.ToString(),
+            ["empty"] = entries.Length == 0 ? "<p>No public service results.</p>" : "",
+            ["lastScan"] = Timestamp(publicScan, "GeneratedAt") is { } timestamp
+                ? $"<p class=\"last-scan\">Last scan: {TimeHtml(timestamp)}</p>" : "",
+            // Keep the safely serialized public snapshot for offline inspection and existing consumers.
+            ["scanJson"] = publicScan.ToJsonString()
+        };
+        // One pass: scan values resembling placeholders must never be interpreted as template material.
+        return Regex.Replace(Template, @"\{\{(\w+)\}\}", match => values[match.Groups[1].Value]);
+    }
+
+    private sealed record Entry(JsonObject Result, string Domain, string Scheme, int Port, string Origin, string Id);
+
+    private static Entry CreateEntry(JsonObject result)
+    {
+        var domain = Text(result, "Domain") ?? "(unknown hostname)";
+        var scheme = (Text(result, "Scheme") ?? "unknown").ToLowerInvariant();
+        var port = result["Port"] is JsonValue value && value.TryGetValue<int>(out var number) ? number : 0;
+        var defaultPort = scheme == "http" && port == 80 || scheme == "https" && port == 443;
+        var origin = $"{scheme}://{domain}{(defaultPort ? "" : ":" + port.ToString(CultureInfo.InvariantCulture))}/";
+        // Normalize hostname case/trailing dot. IDs never depend on ordering, title, status or scan time.
+        var identity = $"{scheme}\n{NormalizeHost(domain)}\n{port.ToString(CultureInfo.InvariantCulture)}";
+        var id = "service-" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
+        return new Entry(result, domain, scheme, port, origin, id);
+    }
+
+    private static string ServiceStatus(JsonNode result)
+    {
+        if (!Flag(result, "Reachable")) return "Unreachable";
+        if (result["StatusCode"] is JsonValue status && status.TryGetValue<int>(out var code)) return $"Reachable · HTTP {code}";
+        if ((result["RobotsAllowed"] is JsonValue allowed && allowed.TryGetValue<bool>(out var canFetch) && !canFetch) ||
+            RobotsName(result) is "Disallowed" or "Unavailable")
+            return "Reachable · homepage not fetched / robots restricted";
+        return Text(result, "HomepageError") is { Length: > 0 }
+            ? "Reachable · homepage fetch failed (no HTTP status)"
+            : "Reachable · homepage not fetched (no HTTP status)";
+    }
+
+    private static string RobotsName(JsonNode result)
+    {
+        if (result["Robots"] is JsonValue value)
+        {
+            if (value.TryGetValue<int>(out var number) && Enum.IsDefined(typeof(RobotsStatus), number))
+                return ((RobotsStatus)number).ToString();
+            if (value.TryGetValue<string>(out var text)) return text;
         }
+        return "NotChecked";
+    }
 
-        if (event.key === "r") {
-            if (filtered.length === 0)
-                return;
+    private static string OriginHtml(Entry entry) =>
+        entry.Scheme is "http" or "https" && SafeLink(entry.Origin, out var uri) &&
+        uri!.UserInfo.Length == 0 && uri.AbsolutePath == "/" && uri.Query.Length == 0 && uri.Fragment.Length == 0 &&
+        uri.Port == entry.Port && NormalizeHost(uri.Host.Trim('[', ']')) == NormalizeHost(entry.Domain.Trim('[', ']'))
+            ? ExternalLink(entry.Origin, entry.Origin) : E(entry.Origin);
 
-            currentIndex =
-                Math.floor(
-                    Math.random() *
-                    filtered.length);
+    private static bool SafeLink(string link, out Uri? uri) =>
+        Uri.TryCreate(link, UriKind.Absolute, out uri) && uri.IsWellFormedOriginalString() &&
+        uri.Scheme is "http" or "https" or "gopher" or "gemini";
 
-            render();
+    private static string ExternalLink(string href, string label) =>
+        $"<a href=\"{E(href)}\" target=\"_blank\" rel=\"noopener noreferrer\">{E(label)}</a>";
+
+    private static string HostHtml(string host, IReadOnlyDictionary<string, Entry[]> entriesByHost)
+    {
+        if (!entriesByHost.TryGetValue(NormalizeHost(host), out var matches)) return E(host);
+        return E(host) + " · " + string.Join(" · ", matches.Select(entry =>
+            $"<a href=\"#{entry.Id}\">{E(entry.Scheme.ToUpperInvariant())}:{entry.Port}</a>"));
+    }
+
+    private static void HostGroup(StringBuilder html, string label, KeyValuePair<string, HashSet<string>>[] hosts, IReadOnlyDictionary<string, Entry[]> entriesByHost)
+    {
+        html.Append($"<details><summary>{label} ({hosts.Length})</summary>");
+        if (hosts.Length == 0) html.Append("<p class=\"muted\">None.</p>");
+        foreach (var (host, sources) in hosts)
+        {
+            html.Append($"<div class=\"host-row\">{HostHtml(host, entriesByHost)}<div class=\"muted\">discovered from {sources.Count} origin(s)</div><details><summary>Sources (up to 10)</summary><ul>");
+            foreach (var source in sources.Order(StringComparer.Ordinal).Take(10)) html.Append($"<li>{E(source)}</li>");
+            html.Append("</ul></details></div>");
         }
-    });
+        html.Append("</details>");
+    }
 
-render();
-</script>
+    private static void Field(StringBuilder html, JsonNode result, string key, string label)
+    {
+        if (result[key] is JsonValue value) html.Append($"<p><strong>{label}:</strong> {E(value.ToString())}</p>");
+    }
 
-</body>
-</html>
-""";
+    private static void Stat(StringBuilder html, int count, string label) =>
+        html.Append($"<div class=\"stat\"><div class=\"stat-value\">{count}</div><div class=\"stat-label\">{label}</div></div>");
 
-        return html;
+    private static void OptionalStat(StringBuilder html, JsonNode scan, string key, string label)
+    {
+        if (scan[key] is JsonValue value && value.TryGetValue<int>(out var count) && count >= 0) Stat(html, count, label);
+    }
+
+    private static string E(string? value) => WebUtility.HtmlEncode(value ?? "");
+    private static string NormalizeHost(string host) => host.Trim().TrimEnd('.').ToLowerInvariant();
+    private static string? Text(JsonNode node, string key) =>
+        node[key] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+    private static bool Flag(JsonNode node, string key) =>
+        node[key] is JsonValue value && value.TryGetValue<bool>(out var flag) && flag;
+    private static string[] Strings(JsonNode node, string key) =>
+        (node[key] as JsonArray ?? []).OfType<JsonValue>().Select(value =>
+            value.TryGetValue<string>(out var text) ? text : null).OfType<string>().ToArray();
+    private static double? Number(JsonNode node, string key) =>
+        node[key] is JsonValue value && value.TryGetValue<double>(out var number) && double.IsFinite(number) ? number : null;
+    private static DateTimeOffset? Timestamp(JsonNode node, string key) =>
+        DateTimeOffset.TryParse(Text(node, key), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var timestamp)
+            ? timestamp.ToUniversalTime() : null;
+    private static string TimeHtml(DateTimeOffset time) =>
+        $"<time datetime=\"{E(time.ToString("O", CultureInfo.InvariantCulture))}\">{E(time.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture))}</time>";
+
+    private static string LoadTemplate()
+    {
+        using var stream = typeof(AtlasReportGenerator).Assembly.GetManifestResourceStream("DN42Atlas.Reporting.viewer.html")
+            ?? throw new InvalidOperationException("Bundled viewer template is missing.");
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
     }
 }
