@@ -110,6 +110,24 @@ public sealed class AtlasReportGeneratorTests
     }
 
     [TestMethod]
+    public void ClientNavigationUpdatesHistoryWithoutNativeAnchorScrolling()
+    {
+        var html = Generate("""{"Results":[]}""");
+        var script = html[html.IndexOf("<script>", StringComparison.Ordinal)..];
+        Assert.IsFalse(Regex.IsMatch(script, @"location\.hash\s*=(?!=)"),
+            "Hash assignment performs native anchor navigation and scrolls the viewport.");
+        Assert.Contains("history.pushState(null, '', '#' + selected)", script);
+        Assert.Contains("history.replaceState(null, '', '#' + selected)", script);
+        Assert.Contains("window.addEventListener('popstate', fromHash)", script);
+        Assert.Contains("window.addEventListener('hashchange', fromHash)", script);
+        Assert.Contains("if (!fromHash())", script);
+        var selection = script[script.IndexOf("function select(", StringComparison.Ordinal)..
+            script.IndexOf("function applyFilter(", StringComparison.Ordinal)];
+        Assert.DoesNotContain("scrollIntoView", selection);
+        Assert.DoesNotContain(".focus(", selection);
+    }
+
+    [TestMethod]
     public void DiscoveryLabelsDistinguishSeedMembershipAndLinkToExistingServices()
     {
         var basic = WithoutScript(Generate("""

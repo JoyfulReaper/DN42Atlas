@@ -168,7 +168,7 @@ const scan = {{scanJson}};
         render();
         if (updateHash && selected && location.hash !== '#' + selected) {
             if (replace) history.replaceState(null, '', '#' + selected);
-            else location.hash = selected;
+            else history.pushState(null, '', '#' + selected);
         }
     }
 
@@ -225,6 +225,7 @@ const scan = {{scanJson}};
         document.getElementById(id).scrollIntoView({ block: 'nearest' });
     });
     window.addEventListener('hashchange', fromHash);
+    window.addEventListener('popstate', fromHash);
     document.addEventListener('keydown', event => {
         if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.target.isContentEditable ||
             event.target.closest('input, select, textarea, button, a, summary')) return;
