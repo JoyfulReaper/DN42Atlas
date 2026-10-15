@@ -31,6 +31,9 @@
     kbd { font: inherit; }
     .copy-fallback { flex: 1 1 100%; min-width: 0; }
     .search-label { flex: 1 1 260px; }
+    .discovery-filters { margin: 0; }
+    .discovery-filters[open] { flex-basis: 100%; }
+    .filter-options { display: flex; flex-wrap: wrap; gap: .65rem; padding-top: .65rem; }
     button, input, select { font: inherit; color: #c9d1d9; background: #21262d; border: 1px solid #30363d; border-radius: 6px; padding: .5rem; }
     input { min-width: 0; width: 100%; }
     button { cursor: pointer; }
@@ -46,6 +49,9 @@
     th, td { padding: .65rem .5rem; border-bottom: 1px solid #30363d; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
     th[scope="row"] { font-weight: normal; }
     thead th { position: sticky; top: 0; background: #161b22; z-index: 1; }
+    .sort-button { width: 100%; text-align: left; font-weight: bold; background: transparent; }
+    .sort-button:disabled { opacity: 1; }
+    .sort-indicator { color: #8b949e; }
     th:nth-child(1) { width: 30%; }
     td:nth-child(2) { width: 25%; }
     td:nth-child(3) { min-width: 7rem; }
@@ -101,6 +107,15 @@
         <label for="scheme">Scheme <select id="scheme"><option value="">All</option><option value="http">HTTP</option><option value="https">HTTPS</option></select></label>
         <label for="robots">Robots <select id="robots"><option value="">All states</option><option value="NoRules">No rules</option><option value="Allowed">Allowed</option><option value="Disallowed">Disallowed</option><option value="Unavailable">Unavailable</option><option value="NotChecked">Not checked</option></select></label>
         <label for="reachability">Status <select id="reachability"><option value="">All results</option><option value="true">Reachable</option><option value="false">Unreachable</option></select></label>
+        <details class="discovery-filters" id="discovery-filters">
+            <summary>Discovery filters <span id="discovery-count" class="muted"></span></summary>
+            <div class="filter-options">
+                <label for="homepage-response">Homepage response <select id="homepage-response"><option value="">All results</option><option value="true">HTTP status recorded</option><option value="false">No HTTP status recorded</option></select></label>
+                <label for="has-title">Page title <select id="has-title"><option value="">All results</option><option value="true">Has title</option><option value="false">No title</option></select></label>
+                <label for="has-links">Discovered links <select id="has-links"><option value="">All results</option><option value="true">Has links</option><option value="false">No links recorded</option></select></label>
+                <label for="port-kind">Web port <select id="port-kind" title="Default ports: HTTP 80 and HTTPS 443"><option value="">All ports</option><option value="standard">Default for scheme</option><option value="other">Other web ports</option></select></label>
+            </div>
+        </details>
         <button id="reset" type="button">Reset filters</button>
         <span class="counter" id="counter" role="status" aria-live="polite"></span>
     </div>
@@ -112,7 +127,12 @@
             <div class="table-scroll" tabindex="0" role="region" aria-label="Public service directory">
                 <table>
                     <caption id="directory-count">All public service results, including origins without a fetched homepage.</caption>
-                    <thead><tr><th scope="col">Origin</th><th scope="col">Title</th><th scope="col">Scheme / port</th><th scope="col">Status</th></tr></thead>
+                    <thead><tr>
+                        <th scope="col" data-sort="origin"><button class="sort-button" type="button" disabled>Origin <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                        <th scope="col" data-sort="title"><button class="sort-button" type="button" disabled>Title <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                        <th scope="col" data-sort="scheme"><button class="sort-button" type="button" disabled>Scheme / port <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                        <th scope="col" data-sort="status"><button class="sort-button" type="button" disabled>Status <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                    </tr></thead>
                     <tbody id="services">{{rows}}</tbody>
                 </table>
             </div>
@@ -147,6 +167,16 @@ const scan = {{scanJson}};
     const scheme = document.getElementById('scheme');
     const robots = document.getElementById('robots');
     const reachability = document.getElementById('reachability');
+    const discoveryFilters = [
+        [document.getElementById('homepage-response'), 'response'],
+        [document.getElementById('has-title'), 'title'],
+        [document.getElementById('has-links'), 'links'],
+        [document.getElementById('port-kind'), 'portKind']
+    ];
+    const sortHeaders = Array.from(document.querySelectorAll('th[data-sort]'));
+    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+    let sortKey = 'origin';
+    let sortDirection = 1;
     const previous = document.getElementById('previous');
     const next = document.getElementById('next');
     const random = document.getElementById('random');
@@ -186,6 +216,8 @@ const scan = {{scanJson}};
         document.getElementById('no-selection').hidden = selected !== null;
         for (const button of [previous, next, random]) button.disabled = filtered.length === 0;
         copyLink.disabled = selected === null;
+        const activeDiscovery = discoveryFilters.filter(([control]) => control.value).length;
+        document.getElementById('discovery-count').textContent = activeDiscovery ? `(${activeDiscovery} active)` : '';
     }
 
     function select(id, updateHash = true, replace = false) {
@@ -207,14 +239,37 @@ const scan = {{scanJson}};
             row.dataset.search.toLowerCase().includes(query) &&
             (!scheme.value || row.dataset.scheme === scheme.value) &&
             (!robots.value || row.dataset.robots === robots.value) &&
-            (!reachability.value || row.dataset.reachable === reachability.value));
+            (!reachability.value || row.dataset.reachable === reachability.value) &&
+            discoveryFilters.every(([control, key]) => !control.value || row.dataset[key] === control.value));
         const retained = filtered.some(row => row.dataset.service === selected);
         select(retained ? selected : filtered[0]?.dataset.service, updateHash, true);
     }
 
     function clearFilters() {
         search.value = scheme.value = robots.value = reachability.value = '';
+        for (const [control] of discoveryFilters) control.value = '';
         filtered = rows;
+    }
+
+    function sortRows() {
+        const column = { origin: 0, title: 1, status: 3 }[sortKey];
+        rows.sort((a, b) => {
+            const compared = sortKey === 'scheme'
+                ? collator.compare(a.dataset.scheme, b.dataset.scheme) || Number(a.dataset.port) - Number(b.dataset.port)
+                : collator.compare(a.cells[column].textContent.trim(), b.cells[column].textContent.trim());
+            return (compared || collator.compare(a.dataset.service, b.dataset.service)) * sortDirection;
+        });
+        const body = document.getElementById('services');
+        for (const row of rows) body.appendChild(row);
+        for (const header of sortHeaders) {
+            const active = header.dataset.sort === sortKey;
+            if (active) header.setAttribute('aria-sort', sortDirection === 1 ? 'ascending' : 'descending');
+            else header.removeAttribute('aria-sort');
+            header.querySelector('.sort-indicator').textContent = active ? (sortDirection === 1 ? '↑' : '↓') : '↕';
+            const button = header.querySelector('button');
+            const label = button.textContent.replace(/[↑↓↕]/g, '').trim();
+            button.setAttribute('aria-label', `${label}: sort ${active && sortDirection === 1 ? 'descending' : 'ascending'}`);
+        }
     }
 
     function fromHash() {
@@ -263,8 +318,25 @@ const scan = {{scanJson}};
         }
     });
     search.addEventListener('input', () => applyFilter());
-    for (const filter of [scheme, robots, reachability]) filter.addEventListener('change', () => applyFilter());
+    for (const filter of [scheme, robots, reachability, ...discoveryFilters.map(([control]) => control)])
+        filter.addEventListener('change', () => applyFilter());
+    for (const header of sortHeaders) {
+        const button = header.querySelector('button');
+        button.disabled = false;
+        button.addEventListener('click', () => {
+            sortDirection = sortKey === header.dataset.sort ? -sortDirection : 1;
+            sortKey = header.dataset.sort;
+            sortRows();
+            applyFilter(false);
+        });
+    }
     document.getElementById('reset').addEventListener('click', () => { clearFilters(); applyFilter(); });
+    const discovery = document.getElementById('discovery-filters');
+    discovery.addEventListener('toggle', () => {
+        updateStickyControls();
+        // Expanding may make the toolbar too tall to pin; keep the opened filters in view.
+        if (discovery.open) discovery.scrollIntoView({ block: 'nearest' });
+    });
     document.addEventListener('click', event => {
         const link = event.target.closest('a[href^="#service-"]');
         if (!link || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
@@ -288,6 +360,7 @@ const scan = {{scanJson}};
         if (event.key === 'r') random.click();
     });
 
+    sortRows();
     if (!fromHash()) select(rows[0]?.dataset.service, !location.hash, true);
     controls.hidden = false;
     updateStickyControls();

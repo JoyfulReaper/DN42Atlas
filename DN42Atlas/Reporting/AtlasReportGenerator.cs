@@ -95,11 +95,19 @@ public static class AtlasReportGenerator
         {
             var result = entry.Result;
             var title = Text(result, "Title");
-            if (string.IsNullOrWhiteSpace(title)) title = "(no title)";
+            var hasTitle = !string.IsNullOrWhiteSpace(title);
+            if (!hasTitle) title = "(no title)";
             var robots = RobotsName(result);
+            var links = Strings(result, "DiscoveredLinks");
+            var hasResponse = result["StatusCode"] is JsonValue status && status.TryGetValue<int>(out var statusCode) &&
+                statusCode is >= 100 and <= 599;
+            var standardPort = entry.Scheme == "http" && entry.Port == 80 || entry.Scheme == "https" && entry.Port == 443;
+            var portKind = entry.Scheme is "http" or "https" && entry.Port is >= 1 and <= 65535
+                ? (standardPort ? "standard" : "other") : "";
             var searchable = $"{entry.Domain} {entry.Origin} {title} {Text(result, "ContentType")}";
             rows.Append($"""
-                <tr data-service="{entry.Id}" data-search="{E(searchable)}" data-scheme="{E(entry.Scheme)}" data-robots="{E(robots)}" data-reachable="{(Flag(result, "Reachable") ? "true" : "false")}">
+                <tr data-service="{entry.Id}" data-search="{E(searchable)}" data-scheme="{E(entry.Scheme)}" data-robots="{E(robots)}" data-reachable="{(Flag(result, "Reachable") ? "true" : "false")}"
+                    data-port="{entry.Port}" data-response="{(hasResponse ? "true" : "false")}" data-title="{(hasTitle ? "true" : "false")}" data-links="{(links.Length > 0 ? "true" : "false")}" data-port-kind="{portKind}">
                     <th scope="row"><a href="#{entry.Id}">{E(entry.Origin)}</a></th>
                     <td>{E(title)}</td><td>{E(entry.Scheme.ToUpperInvariant())} / {entry.Port}</td>
                     <td>{E(ServiceStatus(result))}<br><span class="muted">robots: {E(robots)}</span></td>
@@ -121,7 +129,6 @@ public static class AtlasReportGenerator
             Field(details, result, "HomepageError", "Homepage error");
             Field(details, result, "Error", "Probe error");
             if (Flag(result, "ContentTruncated")) details.Append("<p class=\"warn\">Homepage body was truncated during discovery.</p>");
-            var links = Strings(result, "DiscoveredLinks");
             details.Append($"<details><summary>Discovered links ({links.Length}{(Flag(result, "LinksTruncated") ? "+" : "")})</summary>");
             if (links.Length == 0) details.Append("<p class=\"muted\">No links discovered.</p>");
             else

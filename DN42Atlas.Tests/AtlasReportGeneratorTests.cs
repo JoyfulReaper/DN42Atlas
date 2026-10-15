@@ -77,6 +77,37 @@ public sealed class AtlasReportGeneratorTests
     }
 
     [TestMethod]
+    public void DiscoveryFilterMetadataUsesOnlyRecordedPublicFields()
+    {
+        var basic = WithoutScript(Generate("""
+            {"Results":[
+              {"Domain":"response.dn42","Scheme":"http","Port":80,"StatusCode":404,"Title":"  ","DiscoveredLinks":["https://linked.dn42/"]},
+              {"Domain":"unknown.dn42","Scheme":"https","Port":443,"RobotsStatusCode":200,"Title":"Named"},
+              {"Domain":"other.dn42","Scheme":"http","Port":443,"StatusCode":200,"DiscoveredLinks":[]},
+              {"Domain":"invalid.dn42","Scheme":"http","Port":0},
+              {"Domain":"placeholder.dn42","Scheme":"http","Port":8080,"Title":"(no title)"}
+            ]}
+            """));
+        string Row(string domain) => Regex.Match(basic,
+            $"<tr data-service=\"[^\"]+\" data-search=\"{Regex.Escape(domain)}[^>]*>").Value;
+        Assert.Contains("data-response=\"true\" data-title=\"false\" data-links=\"true\" data-port-kind=\"standard\"", Row("response.dn42"));
+        Assert.Contains("data-response=\"false\" data-title=\"true\" data-links=\"false\" data-port-kind=\"standard\"", Row("unknown.dn42"),
+            "A robots.txt response must not be mistaken for a homepage response.");
+        Assert.Contains("data-port=\"443\"", Row("other.dn42"));
+        Assert.Contains("data-port-kind=\"other\"", Row("other.dn42"), "HTTP on 443 is not its scheme's default port.");
+        Assert.Contains("data-port-kind=\"\"", Row("invalid.dn42"), "An unknown/invalid port must not be classified as a web port.");
+        Assert.Contains("data-title=\"true\"", Row("placeholder.dn42"), "A real title matching the display placeholder still counts as a title.");
+        Assert.Contains("<details class=\"discovery-filters\" id=\"discovery-filters\">", basic);
+        foreach (var key in new[] { "origin", "title", "scheme", "status" })
+        {
+            var header = Regex.Match(basic, $"<th scope=\"col\" data-sort=\"{key}\">.*?</th>").Value;
+            Assert.Contains("<button class=\"sort-button\" type=\"button\" disabled>", header,
+                "Sorting controls are enhanced by JavaScript; static column labels must remain available without it.");
+            Assert.Contains("aria-hidden=\"true\"", header);
+        }
+    }
+
+    [TestMethod]
     public void UntrustedFieldsAreEscapedAndUnsafeUrlsNeverBecomeActiveLinks()
     {
         const string hostile = "\"><img src=x onerror=alert(1)> & ' {{rows}} </script>";
