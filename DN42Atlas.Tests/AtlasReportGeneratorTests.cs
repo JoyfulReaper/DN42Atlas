@@ -56,6 +56,27 @@ public sealed class AtlasReportGeneratorTests
     }
 
     [TestMethod]
+    public void BrowseControlsIncludeShortcutHelpAndAccessibleCopyFallback()
+    {
+        var basic = WithoutScript(Generate("""{"Results":[]}"""));
+        var controls = Regex.Match(basic, "<div class=\"controls\"[^>]*>.*?</div>", RegexOptions.Singleline).Value;
+        Assert.Contains("id=\"controls\" hidden", controls,
+            "JavaScript-only controls must stay hidden when scripting is unavailable.");
+        Assert.Contains("<kbd>←</kbd> previous", controls);
+        Assert.Contains("<kbd>→</kbd> next", controls);
+        Assert.Contains("<kbd>R</kbd> random (outside controls)", controls);
+        Assert.Contains("<button id=\"copy-link\" type=\"button\" disabled>Copy link</button>", controls,
+            "Copying must be unavailable until JavaScript has selected a service.");
+        var feedback = Regex.Match(controls, "<span[^>]*id=\"copy-status\"[^>]*>").Value;
+        Assert.Contains("role=\"status\"", feedback);
+        Assert.Contains("aria-live=\"polite\"", feedback);
+        Assert.Contains("aria-atomic=\"true\"", feedback);
+        Assert.Contains("for=\"copy-url\" hidden>Service link", controls);
+        Assert.Contains("<input id=\"copy-url\" type=\"text\" readonly>", controls,
+            "The manual-copy fallback must have a label and a selectable read-only URL.");
+    }
+
+    [TestMethod]
     public void UntrustedFieldsAreEscapedAndUnsafeUrlsNeverBecomeActiveLinks()
     {
         const string hostile = "\"><img src=x onerror=alert(1)> & ' {{rows}} </script>";

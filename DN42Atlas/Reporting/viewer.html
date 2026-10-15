@@ -6,6 +6,7 @@
 <title>DN42Atlas</title>
 <style>
     :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    html { scroll-padding-top: var(--controls-offset, 0px); }
     * { box-sizing: border-box; }
     [hidden] { display: none !important; }
     body { margin: 0; background: #0d1117; color: #c9d1d9; }
@@ -23,8 +24,12 @@
     .stat-value { font-size: 1.5rem; font-weight: bold; color: #58a6ff; }
     .stat-label, .scan-times, .counter, .last-scan, .hosting-note { font-size: .85rem; }
     .scan-times { display: flex; flex-wrap: wrap; gap: 0 1.5rem; color: #8b949e; }
-    .controls { align-items: center; margin: 1rem 0; }
+    .controls { align-items: center; margin: 1rem 0; padding: .65rem 0; background: #0d1117; border-bottom: 1px solid #30363d; }
+    .controls.is-sticky { position: sticky; top: 0; z-index: 2; }
     .controls label { display: flex; gap: .4rem; align-items: center; }
+    .shortcut-hint, .copy-status { font-size: .8rem; }
+    kbd { font: inherit; }
+    .copy-fallback { flex: 1 1 100%; min-width: 0; }
     .search-label { flex: 1 1 260px; }
     button, input, select { font: inherit; color: #c9d1d9; background: #21262d; border: 1px solid #30363d; border-radius: 6px; padding: .5rem; }
     input { min-width: 0; width: 100%; }
@@ -88,6 +93,10 @@
         <button id="previous" type="button">← Previous</button>
         <button id="random" type="button">Random</button>
         <button id="next" type="button">Next →</button>
+        <span class="muted shortcut-hint">Keys: <kbd>←</kbd> previous · <kbd>→</kbd> next · <kbd>R</kbd> random (outside controls)</span>
+        <button id="copy-link" type="button" disabled>Copy link</button>
+        <span class="muted copy-status" id="copy-status" role="status" aria-live="polite" aria-atomic="true"></span>
+        <label class="copy-fallback" id="copy-fallback" for="copy-url" hidden>Service link <input id="copy-url" type="text" readonly></label>
         <label class="search-label" for="search">Search <input id="search" type="search" placeholder="Hostname, title or content type"></label>
         <label for="scheme">Scheme <select id="scheme"><option value="">All</option><option value="http">HTTP</option><option value="https">HTTPS</option></select></label>
         <label for="robots">Robots <select id="robots"><option value="">All states</option><option value="NoRules">No rules</option><option value="Allowed">Allowed</option><option value="Disallowed">Disallowed</option><option value="Unavailable">Unavailable</option><option value="NotChecked">Not checked</option></select></label>
@@ -141,8 +150,23 @@ const scan = {{scanJson}};
     const previous = document.getElementById('previous');
     const next = document.getElementById('next');
     const random = document.getElementById('random');
+    const controls = document.getElementById('controls');
+    const copyLink = document.getElementById('copy-link');
+    const copyStatus = document.getElementById('copy-status');
+    const copyFallback = document.getElementById('copy-fallback');
+    const copyUrl = document.getElementById('copy-url');
     let filtered = rows;
     let selected = null;
+    let copyRequest = 0;
+    let copyFeedbackTimer;
+
+    function updateStickyControls() {
+        const height = controls.getBoundingClientRect().height;
+        // Keep narrow, short or zoomed viewports free of a large pinned toolbar.
+        const sticky = window.innerWidth > 900 && height <= window.innerHeight / 3;
+        controls.classList.toggle('is-sticky', sticky);
+        document.documentElement.style.setProperty('--controls-offset', sticky ? `${height + 16}px` : '0px');
+    }
 
     function render() {
         const visible = new Set(filtered);
@@ -161,9 +185,14 @@ const scan = {{scanJson}};
         document.getElementById('no-matches').hidden = filtered.length !== 0;
         document.getElementById('no-selection').hidden = selected !== null;
         for (const button of [previous, next, random]) button.disabled = filtered.length === 0;
+        copyLink.disabled = selected === null;
     }
 
     function select(id, updateHash = true, replace = false) {
+        ++copyRequest;
+        clearTimeout(copyFeedbackTimer);
+        copyStatus.textContent = '';
+        copyFallback.hidden = true;
         selected = byId.has(id) ? id : null;
         render();
         if (updateHash && selected && location.hash !== '#' + selected) {
@@ -210,6 +239,29 @@ const scan = {{scanJson}};
     random.addEventListener('click', () => {
         if (filtered.length) select(filtered[Math.floor(Math.random() * filtered.length)].dataset.service);
     });
+    copyLink.addEventListener('click', async () => {
+        if (!selected) return;
+        const request = ++copyRequest;
+        const url = new URL(location.href);
+        url.hash = selected;
+        clearTimeout(copyFeedbackTimer);
+        copyStatus.textContent = '';
+        copyFallback.hidden = true;
+        try {
+            await navigator.clipboard.writeText(url.href);
+            if (request !== copyRequest) return;
+            copyStatus.textContent = 'Copied';
+            copyFeedbackTimer = setTimeout(() => { copyStatus.textContent = ''; }, 2500);
+        } catch {
+            if (request !== copyRequest) return;
+            // HTTP, offline files and denied clipboard access still offer a shareable URL.
+            copyUrl.value = url.href;
+            copyFallback.hidden = false;
+            copyStatus.textContent = 'Select and copy the link below.';
+            copyUrl.focus();
+            copyUrl.select();
+        }
+    });
     search.addEventListener('input', () => applyFilter());
     for (const filter of [scheme, robots, reachability]) filter.addEventListener('change', () => applyFilter());
     document.getElementById('reset').addEventListener('click', () => { clearFilters(); applyFilter(); });
@@ -237,7 +289,10 @@ const scan = {{scanJson}};
     });
 
     if (!fromHash()) select(rows[0]?.dataset.service, !location.hash, true);
-    document.getElementById('controls').hidden = false;
+    controls.hidden = false;
+    updateStickyControls();
+    window.addEventListener('resize', updateStickyControls);
+    if (typeof ResizeObserver !== 'undefined') new ResizeObserver(updateStickyControls).observe(controls);
 })();
 </script>
 </body>
