@@ -106,7 +106,7 @@
         <label class="search-label" for="search">Search <input id="search" type="search" placeholder="Hostname, title or content type"></label>
         <label for="scheme">Scheme <select id="scheme"><option value="">All</option><option value="http">HTTP</option><option value="https">HTTPS</option></select></label>
         <label for="robots">Robots <select id="robots"><option value="">All states</option><option value="NoRules">No rules</option><option value="Allowed">Allowed</option><option value="Disallowed">Disallowed</option><option value="Unavailable">Unavailable</option><option value="NotChecked">Not checked</option></select></label>
-        <label for="reachability">Status <select id="reachability"><option value="">All results</option><option value="true">Reachable</option><option value="false">Unreachable</option></select></label>
+        <label for="reachability">Status <select id="reachability"><option value="">All results</option><option value="true" selected>Reachable</option><option value="false">Unreachable</option></select></label>
         <details class="discovery-filters" id="discovery-filters">
             <summary>Discovery filters <span id="discovery-count" class="muted"></span></summary>
             <div class="filter-options">
@@ -361,7 +361,8 @@ const scan = {{scanJson}};
     });
 
     sortRows();
-    if (!fromHash()) select(rows[0]?.dataset.service, !location.hash, true);
+    applyFilter(false);
+    if (!fromHash()) select(filtered[0]?.dataset.service, !location.hash, true);
     controls.hidden = false;
     updateStickyControls();
     window.addEventListener('resize', updateStickyControls);

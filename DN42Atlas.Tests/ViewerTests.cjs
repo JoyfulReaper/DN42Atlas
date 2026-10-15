@@ -31,6 +31,11 @@ function viewer({ hash = '', empty = false } = {}) {
         'controls', 'copy-link', 'copy-status', 'copy-fallback', 'copy-url', 'counter',
         'directory-count', 'no-matches', 'no-selection', 'reset'];
     const ui = Object.fromEntries(ids.map(id => [id, element(id)]));
+    // Match the browser's initial select values, including explicit selected options.
+    for (const [, id, options] of template.matchAll(/<select id="([^"]+)"[^>]*>([\s\S]*?)<\/select>/g)) {
+        const initial = options.match(/<option value="([^"]*)" selected>/) ?? options.match(/<option value="([^"]*)"/);
+        ui[id].value = initial[1];
+    }
     const data = empty ? [] : [
         ['a', 'http://a.dn42/', 'Zulu', 'http', 80, 'true', 'true', 'true', 'true', 'standard', 'Reachable · HTTP 200'],
         ['b', 'http://b.dn42:8080/', 'Alpha', 'http', 8080, 'true', 'true', 'true', 'false', 'other', 'Reachable · HTTP 404'],
@@ -89,6 +94,7 @@ function viewer({ hash = '', empty = false } = {}) {
 
 test('all four headers toggle direction, expose one aria-sort and retain selection/history', () => {
     const v = viewer({ hash: '#service-b' });
+    v.filter('reachability', '');
     assert.equal(v.headers[0].getAttribute('aria-sort'), 'ascending');
     assert.deepEqual(v.visible(), ['a', 'b', 'd', 'c']);
     for (const [key, ascending] of [
@@ -112,6 +118,23 @@ test('all four headers toggle direction, expose one aria-sort and retain selecti
     v.sort('origin');
     assert.deepEqual(v.visible(), ['c', 'd', 'b', 'a']);
     assert.deepEqual(v.history.calls, []);
+});
+
+test('initial status is Reachable, reset shows all and unreachable deep links still work', () => {
+    const v = viewer();
+    assert.equal(v.ui.reachability.value, 'true');
+    assert.deepEqual(v.visible(), ['a', 'b', 'd']);
+    assert.equal(v.selected(), 'a');
+    assert.equal(v.location.hash, '#service-a');
+    v.ui.reset.click();
+    assert.equal(v.ui.reachability.value, '');
+    assert.deepEqual(v.visible(), ['a', 'b', 'd', 'c']);
+
+    const linked = viewer({ hash: '#service-c' });
+    assert.equal(linked.selected(), 'c');
+    assert.equal(linked.ui.reachability.value, '');
+    assert.deepEqual(linked.visible(), ['a', 'b', 'd', 'c']);
+    assert.deepEqual(linked.history.calls, []);
 });
 
 test('search and existing filters compose with sorting', () => {
