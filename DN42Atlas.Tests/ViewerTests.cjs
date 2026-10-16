@@ -30,7 +30,7 @@ function viewer({ hash = '', empty = false, restored = {}, initialize = true, co
     const ids = ['services', 'search', 'scheme', 'robots', 'reachability', 'homepage-response',
         'has-title', 'has-links', 'port-kind', 'discovery-count', 'discovery-filters', 'previous', 'next', 'random',
         'controls', 'copy-link', 'copy-status', 'copy-fallback', 'copy-url', 'counter',
-        'directory-count', 'no-matches', 'no-selection', 'reset'];
+        'directory-count', 'directory-help', 'no-matches', 'no-selection', 'reset'];
     const ui = Object.fromEntries(ids.map(id => [id, element(id)]));
     ui.controls.hidden = true;
     // Match the browser's initial select values, including explicit selected options.
@@ -53,7 +53,12 @@ function viewer({ hash = '', empty = false, restored = {}, initialize = true, co
         row.cells = [origin, title, `${scheme.toUpperCase()} / ${port}`, status + ' robots: Allowed']
             .map(text => ({ textContent: text, querySelector: () => ({ textContent: text }) }));
         const link = element('link-' + id);
-        row.querySelector = () => link;
+        const details = element('details-' + id, 'View details');
+        details.hidden = true;
+        details.setAttribute('aria-controls', row.dataset.service);
+        row.originLink = link;
+        row.detailsButton = details;
+        row.querySelector = selector => selector === '.row-details' ? details : link;
         return row;
     });
     const panels = rows.map(row => element(row.dataset.service));
@@ -81,6 +86,7 @@ function viewer({ hash = '', empty = false, restored = {}, initialize = true, co
             if (selector === '.service-detail') return panels;
             if (selector === '#services tr, .service-detail') return [...rows, ...panels];
             if (selector === '.sort-button') return headers.map(header => header.querySelector('button'));
+            if (selector === '.row-details') return rows.map(row => row.detailsButton);
             return headers;
         },
         getElementById: id => ui[id], addEventListener(type, callback) { this.events[type] = callback; } };
@@ -101,7 +107,7 @@ function viewer({ hash = '', empty = false, restored = {}, initialize = true, co
         while (frames.length) frames.shift()();
     }
     return {
-        ui, headers, window, location, history, panels, root,
+        ui, headers, window, location, history, panels, root, rows,
         initialize() { document.events.DOMContentLoaded(); },
         complete() { window.events.load?.(); while (frames.length) frames.shift()(); },
         beforePaint() { while (frames.length) frames.shift()(); },
@@ -110,6 +116,22 @@ function viewer({ hash = '', empty = false, restored = {}, initialize = true, co
         visible() { return ui.services.children.filter(row => !row.hidden).map(row => row.dataset.service.slice(8)); },
         selected() { return panels.find(panel => !panel.hidden)?.id.slice(8); },
         random(value) { randomValue = value; ui.random.click(); },
+        clickRow(id, part, options = {}) {
+            const row = rows.find(row => row.dataset.service === 'service-' + id);
+            const interactive = ['origin', 'view-details', 'button', 'select', 'input', 'textarea', 'summary', 'details', 'label', 'editable', 'role-button', 'role-link'].includes(part);
+            const target = { closest(selector) {
+                if (selector === 'tr[data-service]') return row;
+                if (selector === 'button.row-details') return part === 'view-details' ? row.detailsButton : null;
+                if (selector.startsWith('a, button,')) return interactive ? {} : null;
+                if (selector === 'a[href^="#service-"]') return null;
+                return null;
+            } };
+            const event = { target, button: 0, defaultPrevented: false,
+                preventDefault() { this.defaultPrevented = true; }, ...options };
+            ui.services.events.click(event);
+            document.events.click(event);
+            return event;
+        },
         visit(id, event = 'hashchange') { location.hash = '#service-' + id; window.events[event](); }
     };
 }
@@ -141,6 +163,61 @@ test('all four headers toggle direction, expose one aria-sort and retain selecti
     v.sort('origin');
     assert.deepEqual(v.visible(), ['c', 'd', 'b', 'a']);
     assert.deepEqual(v.history.calls, initialHistory);
+});
+
+test('Title, Scheme/port, Status and noninteractive blank row space select details without moving the viewport', () => {
+    for (const part of ['title', 'scheme', 'status', 'blank']) {
+        const v = viewer();
+        const before = v.history.calls.length;
+        const event = v.clickRow('b', part);
+        assert.equal(v.selected(), 'b', part);
+        assert.equal(v.location.hash, '#service-b');
+        assert.equal(v.history.calls.length, before + 1);
+        assert.equal(v.history.calls.at(-1), 'push');
+        assert.equal(event.defaultPrevented, false);
+        assert.equal(v.panels.some(panel => panel.scrolledIntoView || panel.focused), false);
+    }
+});
+
+test('external Origin clicks keep selection/history intact and preserve normal browser activation', () => {
+    for (const options of [{}, { button: 1 }, { ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }]) {
+        const v = viewer();
+        const before = [...v.history.calls];
+        const event = v.clickRow('b', 'origin', options);
+        assert.equal(v.selected(), 'a');
+        assert.equal(v.location.hash, '#service-a');
+        assert.deepEqual(v.history.calls, before);
+        assert.equal(event.defaultPrevented, false, 'Do not intercept left/middle/modifier activation of the Origin link.');
+    }
+});
+
+test('row delegation ignores other interactive descendants, canceled events and modified clicks', () => {
+    const v = viewer();
+    for (const part of ['button', 'select', 'input', 'textarea', 'summary', 'details', 'label', 'editable', 'role-button', 'role-link'])
+        v.clickRow('b', part);
+    for (const options of [{ defaultPrevented: true }, { button: 1 }, { ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }])
+        v.clickRow('b', 'blank', options);
+    v.clickRow('c', 'title'); // Hidden rows are not activation targets.
+    assert.equal(v.selected(), 'a');
+    v.sort('title');
+    assert.equal(v.selected(), 'a', 'Header sorting must not activate any service row.');
+    assert.equal(v.rows.every(row => Object.keys(row.events).length === 0), true, 'Use tbody delegation, not per-row listeners.');
+});
+
+test('native View details keyboard clicks select a row and expose the controlled panel state', () => {
+    const v = viewer();
+    const a = v.rows.find(row => row.dataset.service === 'service-a');
+    const b = v.rows.find(row => row.dataset.service === 'service-b');
+    assert.equal(a.originLink.getAttribute('aria-current'), undefined, 'An external Origin is not an internal current-page link.');
+    assert.equal(a.detailsButton.getAttribute('aria-current'), 'true');
+    assert.equal(b.detailsButton.hidden, false);
+    assert.equal(b.detailsButton.getAttribute('aria-controls'), 'service-b');
+    // Native buttons translate Enter/Space to a click with detail=0, handled by the same delegate.
+    v.clickRow('b', 'view-details', { detail: 0 });
+    assert.equal(v.selected(), 'b');
+    assert.equal(b.detailsButton.getAttribute('aria-current'), 'true');
+    assert.equal(a.detailsButton.getAttribute('aria-current'), undefined);
+    assert.equal(v.panels.some(panel => panel.scrolledIntoView || panel.focused), false);
 });
 
 test('initial status is Reachable, reset shows all and unreachable deep links still work', () => {

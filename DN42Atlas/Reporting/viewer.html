@@ -60,6 +60,10 @@
     td:nth-child(2) { width: 25%; }
     td:nth-child(3) { min-width: 7rem; }
     tr.selected { background: #1f3046; }
+    #services tr.selectable { cursor: pointer; }
+    #services tr.selectable:hover:not(.selected) { background: #1b2531; }
+    .row-details { display: block; margin-top: .4rem; padding: .3rem .45rem; font-size: .75rem; }
+    .directory-help { font-size: .85rem; }
     .origin, li, .host-row, .service-detail p { overflow-wrap: anywhere; }
     .origin { margin-top: 0; }
     .service-detail { margin-bottom: 1rem; scroll-margin-top: 1rem; }
@@ -96,6 +100,8 @@
         .directory tbody th, .directory tbody td { display: block; width: auto; min-width: 0; padding: .35rem .5rem; border: 0; }
         .directory .cell-label { display: block; margin-bottom: .2rem; color: #8b949e; font-size: .75rem; }
         .directory th .cell-value { display: flex; align-items: center; min-height: 44px; }
+        .directory th .cell-value a, .directory .row-details { min-height: 44px; }
+        .directory th .cell-value a { display: flex; align-items: center; }
         .directory tr.selected { border-color: #58a6ff; box-shadow: inset 3px 0 #58a6ff; }
     }
 </style>
@@ -114,7 +120,10 @@ const scan = {{scanJson}};
         } catch (error) {
             for (const item of document.querySelectorAll('#services tr, .service-detail')) item.hidden = false;
             document.getElementById('controls').hidden = true;
+            document.getElementById('directory-help').hidden = true;
             for (const button of document.querySelectorAll('.sort-button')) button.disabled = true;
+            for (const row of document.querySelectorAll('#services tr')) row.classList.remove('selectable');
+            for (const button of document.querySelectorAll('.row-details')) button.hidden = true;
             console.error('Atlas viewer initialization failed; showing the static directory.', error);
         } finally {
             root.classList.remove('js-pending');
@@ -134,6 +143,7 @@ const scan = {{scanJson}};
 
     function initialize() {
         const rows = Array.from(document.querySelectorAll('#services tr'));
+        const services = document.getElementById('services');
         const panels = Array.from(document.querySelectorAll('.service-detail'));
         const byId = new Map(rows.map(row => [row.dataset.service, row]));
         const search = document.getElementById('search');
@@ -180,9 +190,11 @@ const scan = {{scanJson}};
                 row.hidden = !visible.has(row);
                 const active = row.dataset.service === selected;
                 row.classList.toggle('selected', active);
-                const link = row.querySelector('a');
-                if (active) link.setAttribute('aria-current', 'true');
-                else link.removeAttribute('aria-current');
+                row.classList.add('selectable');
+                const button = row.querySelector('.row-details');
+                button.hidden = false;
+                if (active) button.setAttribute('aria-current', 'true');
+                else button.removeAttribute('aria-current');
             }
             for (const panel of panels) panel.hidden = panel.id !== selected;
             const index = filtered.findIndex(row => row.dataset.service === selected);
@@ -342,6 +354,16 @@ const scan = {{scanJson}};
             // Expanding may make the toolbar too tall to pin; keep the opened filters in view.
             if (discovery.open) discovery.scrollIntoView({ block: 'nearest' });
         });
+        services.addEventListener('click', event => {
+            if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+            const row = event.target.closest('tr[data-service]');
+            if (!row || row.hidden || !row.classList.contains('selectable') || !byId.has(row.dataset.service)) return;
+            // The native View details button is the one deliberate interactive action handled here.
+            // All other interactive descendants (especially the external Origin link) keep browser behavior.
+            const detailsButton = event.target.closest('button.row-details');
+            if (!detailsButton && event.target.closest('a, button, input, select, textarea, summary, details, label, [contenteditable], [role="button"], [role="link"]')) return;
+            revealService(row.dataset.service, true);
+        });
         document.addEventListener('click', event => {
             const link = event.target.closest('a[href^="#service-"]');
             if (!link || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
@@ -384,6 +406,7 @@ const scan = {{scanJson}};
             });
         }, { once: true });
         controls.hidden = false;
+        document.getElementById('directory-help').hidden = false;
         updateStickyControls();
         window.addEventListener('resize', updateStickyControls);
         if (typeof ResizeObserver !== 'undefined') new ResizeObserver(updateStickyControls).observe(controls);
@@ -427,10 +450,11 @@ const scan = {{scanJson}};
         <button id="reset" type="button">Reset filters</button>
         <span class="counter" id="counter" role="status" aria-live="polite"></span>
     </div>
-    <noscript><p>Select an origin in the directory to jump to its details. All public results are listed below.</p></noscript>
+    <noscript><p>Origin links open services in a new tab. All public service details are listed below.</p></noscript>
     <div class="atlas">
         <section class="card directory" id="directory" aria-labelledby="directory-title">
             <h2 id="directory-title">Service directory</h2>
+            <p class="muted directory-help" id="directory-help" hidden>Origin links open services in a new tab. Select a row or use View details to inspect it here.</p>
             {{empty}}
             <div class="table-scroll" tabindex="0" role="region" aria-label="Public service directory">
                 <table role="table">

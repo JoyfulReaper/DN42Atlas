@@ -43,7 +43,7 @@ public sealed class AtlasReportGeneratorTests
         Assert.Contains("<div class=\"stat-value\">4</div><div class=\"stat-label\">reachable public origins", basic);
         foreach (Match row in Regex.Matches(basic, "<tr data-service=\"([^\"]+)\""))
         {
-            Assert.Contains($"href=\"#{row.Groups[1].Value}\"", basic);
+            Assert.Contains($"aria-controls=\"{row.Groups[1].Value}\"", basic);
             Assert.Contains($"id=\"{row.Groups[1].Value}\"", basic);
         }
         Assert.Contains("id=\"search\"", basic);
@@ -123,7 +123,7 @@ public sealed class AtlasReportGeneratorTests
         foreach (var id in Ids(basic))
         {
             Assert.Contains($"scope=\"row\" role=\"rowheader\" id=\"origin-{id}\" headers=\"column-origin\"", basic);
-            Assert.Contains($"href=\"#{id}\" class=\"cell-value\"", basic);
+            Assert.Contains($"aria-controls=\"{id}\" hidden>View details</button>", basic);
             foreach (var field in new[] { "title", "scheme", "status" })
             {
                 Assert.Contains($"role=\"columnheader\" id=\"column-{field}\"", basic);
@@ -137,6 +137,41 @@ public sealed class AtlasReportGeneratorTests
         Assert.Contains("HTTPS / 8443", basic);
         Assert.Contains("robots: Allowed", basic);
         Assert.Contains("Unreachable", basic);
+    }
+
+    [TestMethod]
+    public void DirectoryOriginsUseTheSameSafeExternalRenderingAsServiceDetails()
+    {
+        var basic = WithoutScript(Generate("""
+            {"Results":[
+              {"Domain":"plain.dn42","Scheme":"http","Port":80,"Reachable":true,"Title":"Plain"},
+              {"Domain":"secure.dn42","Scheme":"https","Port":8443,"Reachable":true},
+              {"Domain":"user@unsafe.dn42","Scheme":"http","Port":80},
+              {"Domain":"path.dn42/injected","Scheme":"https","Port":443},
+              {"Domain":"unsupported.dn42","Scheme":"gopher","Port":70}
+            ]}
+            """));
+        var directory = Regex.Match(basic, "<tbody id=\"services\"[^>]*>(.*?)</tbody>", RegexOptions.Singleline).Value;
+        foreach (var origin in new[] { "http://plain.dn42/", "https://secure.dn42:8443/" })
+        {
+            var link = $"<a href=\"{origin}\" target=\"_blank\" rel=\"noopener noreferrer\">{origin}</a>";
+            Assert.Contains(link, directory);
+            Assert.HasCount(2, Regex.Matches(basic, Regex.Escape(link)), "Directory and details must share the same safe Origin renderer.");
+        }
+        Assert.DoesNotContain("href=\"#service-", directory);
+        foreach (var unsafeOrigin in new[] { "http://user@unsafe.dn42/", "https://path.dn42/injected/", "gopher://unsupported.dn42:70/" })
+        {
+            Assert.Contains(unsafeOrigin, directory);
+            Assert.DoesNotContain($"href=\"{unsafeOrigin}\"", basic);
+        }
+        Assert.Contains("class=\"row-details\" type=\"button\"", directory);
+        Assert.Contains("aria-label=\"View details for http://plain.dn42/\"", directory);
+        foreach (Match row in Regex.Matches(directory, "<tr[^>]*>"))
+        {
+            Assert.Contains("role=\"row\"", row.Value);
+            Assert.DoesNotContain("tabindex", row.Value, "Use native buttons for keyboard activation, retaining row semantics.");
+        }
+        Assert.Contains("All public service details are listed below.", basic);
     }
 
     [TestMethod]
