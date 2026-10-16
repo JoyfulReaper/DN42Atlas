@@ -107,10 +107,11 @@ public static class AtlasReportGenerator
             var searchable = $"{entry.Domain} {entry.Origin} {title} {Text(result, "ContentType")}";
             rows.Append($"""
                 <tr data-service="{entry.Id}" data-search="{E(searchable)}" data-scheme="{E(entry.Scheme)}" data-robots="{E(robots)}" data-reachable="{(Flag(result, "Reachable") ? "true" : "false")}"
-                    data-port="{entry.Port}" data-response="{(hasResponse ? "true" : "false")}" data-title="{(hasTitle ? "true" : "false")}" data-links="{(links.Length > 0 ? "true" : "false")}" data-port-kind="{portKind}">
-                    <th scope="row"><a href="#{entry.Id}">{E(entry.Origin)}</a></th>
-                    <td>{E(title)}</td><td>{E(entry.Scheme.ToUpperInvariant())} / {entry.Port}</td>
-                    <td>{E(ServiceStatus(result))}<br><span class="muted">robots: {E(robots)}</span></td>
+                    data-port="{entry.Port}" data-response="{(hasResponse ? "true" : "false")}" data-title="{(hasTitle ? "true" : "false")}" data-links="{(links.Length > 0 ? "true" : "false")}" data-port-kind="{portKind}" role="row">
+                    <th scope="row" role="rowheader" id="origin-{entry.Id}" headers="column-origin"><span class="cell-label" aria-hidden="true">Origin</span><a href="#{entry.Id}" class="cell-value">{E(entry.Origin)}</a></th>
+                    <td role="cell" headers="column-title origin-{entry.Id}"><span class="cell-label" aria-hidden="true">Title</span><span class="cell-value">{E(title)}</span></td>
+                    <td role="cell" headers="column-scheme origin-{entry.Id}"><span class="cell-label" aria-hidden="true">Scheme / port</span><span class="cell-value">{E(entry.Scheme.ToUpperInvariant())} / {entry.Port}</span></td>
+                    <td role="cell" headers="column-status origin-{entry.Id}"><span class="cell-label" aria-hidden="true">Status</span><span class="cell-value">{E(ServiceStatus(result))}<br><span class="muted">robots: {E(robots)}</span></span></td>
                 </tr>
                 """);
             details.Append($"""

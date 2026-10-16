@@ -100,11 +100,43 @@ public sealed class AtlasReportGeneratorTests
         Assert.Contains("<details class=\"discovery-filters\" id=\"discovery-filters\">", basic);
         foreach (var key in new[] { "origin", "title", "scheme", "status" })
         {
-            var header = Regex.Match(basic, $"<th scope=\"col\" data-sort=\"{key}\">.*?</th>").Value;
+            var header = Regex.Match(basic, $"<th scope=\"col\" data-sort=\"{key}\"[^>]*>.*?</th>").Value;
             Assert.Contains("<button class=\"sort-button\" type=\"button\" disabled>", header,
                 "Sorting controls are enhanced by JavaScript; static column labels must remain available without it.");
             Assert.Contains("aria-hidden=\"true\"", header);
         }
+    }
+
+    [TestMethod]
+    public void MobileDirectoryKeepsOneTableWithAccessibleFieldAssociations()
+    {
+        var basic = WithoutScript(Generate("""
+            {"Results":[
+              {"Domain":"mobile.dn42","Scheme":"https","Port":8443,"Reachable":true,"StatusCode":200,"Title":"A long mobile service title","Robots":2},
+              {"Domain":"offline.dn42","Scheme":"http","Port":80,"Reachable":false}
+            ]}
+            """));
+        Assert.HasCount(1, Regex.Matches(basic, "<table role=\"table\">"));
+        Assert.HasCount(2, Regex.Matches(basic, "<tr data-service="));
+        Assert.Contains("<thead role=\"rowgroup\"><tr role=\"row\">", basic);
+        Assert.Contains("<tbody id=\"services\" role=\"rowgroup\">", basic);
+        foreach (var id in Ids(basic))
+        {
+            Assert.Contains($"scope=\"row\" role=\"rowheader\" id=\"origin-{id}\" headers=\"column-origin\"", basic);
+            Assert.Contains($"href=\"#{id}\" class=\"cell-value\"", basic);
+            foreach (var field in new[] { "title", "scheme", "status" })
+            {
+                Assert.Contains($"role=\"columnheader\" id=\"column-{field}\"", basic);
+                Assert.Contains($"role=\"cell\" headers=\"column-{field} origin-{id}\"", basic);
+            }
+        }
+        foreach (var label in new[] { "Origin", "Title", "Scheme / port", "Status" })
+            Assert.Contains($"<span class=\"cell-label\" aria-hidden=\"true\">{label}</span>", basic,
+                "Visual mobile labels must not be announced in addition to the associated table headers.");
+        Assert.Contains("A long mobile service title", basic);
+        Assert.Contains("HTTPS / 8443", basic);
+        Assert.Contains("robots: Allowed", basic);
+        Assert.Contains("Unreachable", basic);
     }
 
     [TestMethod]

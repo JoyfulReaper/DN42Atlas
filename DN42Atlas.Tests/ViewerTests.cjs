@@ -46,7 +46,8 @@ function viewer({ hash = '', empty = false } = {}) {
         const row = element('row-' + id);
         row.dataset = { service: 'service-' + id, search: `${origin} ${title} text/html`,
             scheme, port: String(port), robots: 'Allowed', reachable, response, title: hasTitle, links, portKind };
-        row.cells = [origin, title, `${scheme.toUpperCase()} / ${port}`, status + ' robots: Allowed'].map(text => ({ textContent: text }));
+        row.cells = [origin, title, `${scheme.toUpperCase()} / ${port}`, status + ' robots: Allowed']
+            .map(text => ({ textContent: text, querySelector: () => ({ textContent: text }) }));
         const link = element('link-' + id);
         row.querySelector = () => link;
         return row;

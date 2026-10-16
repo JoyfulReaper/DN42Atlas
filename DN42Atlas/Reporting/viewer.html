@@ -52,6 +52,7 @@
     .sort-button { width: 100%; text-align: left; font-weight: bold; background: transparent; }
     .sort-button:disabled { opacity: 1; }
     .sort-indicator { color: #8b949e; }
+    .cell-label { display: none; }
     th:nth-child(1) { width: 30%; }
     td:nth-child(2) { width: 25%; }
     td:nth-child(3) { min-width: 7rem; }
@@ -78,8 +79,21 @@
     @media (max-width: 600px) {
         main, header { padding: 1rem; }
         .card { padding: .75rem; }
-        table { min-width: 560px; }
-        .controls label { flex-wrap: wrap; }
+        .controls label { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+        .controls select, .discovery-filters { max-width: 100%; }
+        .directory table, .directory caption, .directory thead, .directory tbody { display: block; }
+        .directory table { min-width: 0; }
+        .directory .table-scroll { scroll-padding-top: 8rem; }
+        .directory thead { position: sticky; top: 0; z-index: 1; padding: .5rem 0; background: #161b22; }
+        .directory thead tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .4rem; }
+        .directory thead th { position: static; width: auto; min-width: 0; padding: 0; border: 0; }
+        .directory .sort-button { height: 100%; min-height: 44px; }
+        .directory tbody { display: grid; gap: .65rem; }
+        .directory tbody tr { display: grid; min-width: 0; padding: .35rem; border: 1px solid #30363d; border-radius: 6px; }
+        .directory tbody th, .directory tbody td { display: block; width: auto; min-width: 0; padding: .35rem .5rem; border: 0; }
+        .directory .cell-label { display: block; margin-bottom: .2rem; color: #8b949e; font-size: .75rem; }
+        .directory th .cell-value { display: flex; align-items: center; min-height: 44px; }
+        .directory tr.selected { border-color: #58a6ff; box-shadow: inset 3px 0 #58a6ff; }
     }
 </style>
 </head>
@@ -125,15 +139,15 @@
             <h2 id="directory-title">Service directory</h2>
             {{empty}}
             <div class="table-scroll" tabindex="0" role="region" aria-label="Public service directory">
-                <table>
+                <table role="table">
                     <caption id="directory-count">All public service results, including origins without a fetched homepage.</caption>
-                    <thead><tr>
-                        <th scope="col" data-sort="origin"><button class="sort-button" type="button" disabled>Origin <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
-                        <th scope="col" data-sort="title"><button class="sort-button" type="button" disabled>Title <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
-                        <th scope="col" data-sort="scheme"><button class="sort-button" type="button" disabled>Scheme / port <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
-                        <th scope="col" data-sort="status"><button class="sort-button" type="button" disabled>Status <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                    <thead role="rowgroup"><tr role="row">
+                        <th scope="col" data-sort="origin" role="columnheader" id="column-origin"><button class="sort-button" type="button" disabled>Origin <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                        <th scope="col" data-sort="title" role="columnheader" id="column-title"><button class="sort-button" type="button" disabled>Title <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                        <th scope="col" data-sort="scheme" role="columnheader" id="column-scheme"><button class="sort-button" type="button" disabled>Scheme / port <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                        <th scope="col" data-sort="status" role="columnheader" id="column-status"><button class="sort-button" type="button" disabled>Status <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
                     </tr></thead>
-                    <tbody id="services">{{rows}}</tbody>
+                    <tbody id="services" role="rowgroup">{{rows}}</tbody>
                 </table>
             </div>
             <p id="no-matches" hidden>No matching origins. Try changing or resetting the filters.</p>
@@ -256,7 +270,8 @@ const scan = {{scanJson}};
         rows.sort((a, b) => {
             const compared = sortKey === 'scheme'
                 ? collator.compare(a.dataset.scheme, b.dataset.scheme) || Number(a.dataset.port) - Number(b.dataset.port)
-                : collator.compare(a.cells[column].textContent.trim(), b.cells[column].textContent.trim());
+                : collator.compare(a.cells[column].querySelector('.cell-value').textContent.trim(),
+                    b.cells[column].querySelector('.cell-value').textContent.trim());
             return (compared || collator.compare(a.dataset.service, b.dataset.service)) * sortDirection;
         });
         const body = document.getElementById('services');
