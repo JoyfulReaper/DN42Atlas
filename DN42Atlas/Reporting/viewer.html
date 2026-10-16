@@ -9,6 +9,9 @@
     html { scroll-padding-top: var(--controls-offset, 0px); }
     * { box-sizing: border-box; }
     [hidden] { display: none !important; }
+    /* The head bootstrap enables these only while preparing the first enhanced frame. */
+    .js-pending body { visibility: hidden; }
+    .js-pending .service-detail { display: none; }
     body { margin: 0; background: #0d1117; color: #c9d1d9; }
     header { padding: 1rem 1.5rem; border-bottom: 1px solid #30363d; background: #161b22; }
     h1 { margin: 0; font-size: 1.4rem; }
@@ -96,6 +99,297 @@
         .directory tr.selected { border-color: #58a6ff; box-shadow: inset 3px 0 #58a6ff; }
     }
 </style>
+<script>
+const scan = {{scanJson}};
+
+(() => {
+    const root = document.documentElement;
+    const initialHash = location.hash;
+
+    // Register recovery before changing presentation. With scripts disabled (or a parse error),
+    // this class is never set and the complete static directory/details remain usable.
+    document.addEventListener('DOMContentLoaded', () => {
+        try {
+            initialize();
+        } catch (error) {
+            for (const item of document.querySelectorAll('#services tr, .service-detail')) item.hidden = false;
+            document.getElementById('controls').hidden = true;
+            for (const button of document.querySelectorAll('.sort-button')) button.disabled = true;
+            console.error('Atlas viewer initialization failed; showing the static directory.', error);
+        } finally {
+            root.classList.remove('js-pending');
+            if (initialHash) {
+                history.replaceState(history.state, '', initialHash);
+                let id;
+                try { id = decodeURIComponent(initialHash.slice(1)); } catch { /* Keep malformed hashes inert. */ }
+                // An explicit initial link is positioned once, against the final layout, before paint.
+                // Client-side Previous/Next/Random never take this path.
+                document.getElementById(id)?.scrollIntoView({ block: 'start' });
+            }
+        }
+    }, { once: true });
+    // Keep the parser from scrolling to a service panel that enhancement will later collapse.
+    if (initialHash) history.replaceState(history.state, '', location.pathname + location.search);
+    root.classList.add('js-pending');
+
+    function initialize() {
+        const rows = Array.from(document.querySelectorAll('#services tr'));
+        const panels = Array.from(document.querySelectorAll('.service-detail'));
+        const byId = new Map(rows.map(row => [row.dataset.service, row]));
+        const search = document.getElementById('search');
+        const scheme = document.getElementById('scheme');
+        const robots = document.getElementById('robots');
+        const reachability = document.getElementById('reachability');
+        const discoveryFilters = [
+            [document.getElementById('homepage-response'), 'response'],
+            [document.getElementById('has-title'), 'title'],
+            [document.getElementById('has-links'), 'links'],
+            [document.getElementById('port-kind'), 'portKind']
+        ];
+        const exactFilters = [[scheme, 'scheme'], [robots, 'robots'], [reachability, 'reachable'], ...discoveryFilters];
+        const filterControls = [search, ...exactFilters.map(([control]) => control)];
+        let appliedFilterValues;
+        const sortHeaders = Array.from(document.querySelectorAll('th[data-sort]'));
+        const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+        let sortKey = 'origin';
+        let sortDirection = 1;
+        const previous = document.getElementById('previous');
+        const next = document.getElementById('next');
+        const random = document.getElementById('random');
+        const controls = document.getElementById('controls');
+        const copyLink = document.getElementById('copy-link');
+        const copyStatus = document.getElementById('copy-status');
+        const copyFallback = document.getElementById('copy-fallback');
+        const copyUrl = document.getElementById('copy-url');
+        let filtered = rows;
+        let selected = null;
+        let copyRequest = 0;
+        let copyFeedbackTimer;
+
+        function updateStickyControls() {
+            const height = controls.getBoundingClientRect().height;
+            // Keep narrow, short or zoomed viewports free of a large pinned toolbar.
+            const sticky = window.innerWidth > 900 && height <= window.innerHeight / 3;
+            controls.classList.toggle('is-sticky', sticky);
+            document.documentElement.style.setProperty('--controls-offset', sticky ? `${height + 16}px` : '0px');
+        }
+
+        function render() {
+            const visible = new Set(filtered);
+            for (const row of rows) {
+                row.hidden = !visible.has(row);
+                const active = row.dataset.service === selected;
+                row.classList.toggle('selected', active);
+                const link = row.querySelector('a');
+                if (active) link.setAttribute('aria-current', 'true');
+                else link.removeAttribute('aria-current');
+            }
+            for (const panel of panels) panel.hidden = panel.id !== selected;
+            const index = filtered.findIndex(row => row.dataset.service === selected);
+            document.getElementById('counter').textContent = `${index + 1} / ${filtered.length} matching · ${rows.length} total`;
+            document.getElementById('directory-count').textContent = `${filtered.length} of ${rows.length} public service results`;
+            document.getElementById('no-matches').hidden = filtered.length !== 0;
+            document.getElementById('no-selection').hidden = selected !== null;
+            for (const button of [previous, next, random]) button.disabled = filtered.length === 0;
+            copyLink.disabled = selected === null;
+            const activeDiscovery = discoveryFilters.filter(([control]) => control.value).length;
+            document.getElementById('discovery-count').textContent = activeDiscovery ? `(${activeDiscovery} active)` : '';
+        }
+
+        function select(id, updateHash = true, replace = false) {
+            ++copyRequest;
+            clearTimeout(copyFeedbackTimer);
+            copyStatus.textContent = '';
+            copyFallback.hidden = true;
+            selected = byId.has(id) ? id : null;
+            render();
+            if (updateHash && selected && location.hash !== '#' + selected) {
+                if (replace) history.replaceState(null, '', '#' + selected);
+                else history.pushState(null, '', '#' + selected);
+            }
+        }
+
+        function matchingRows() {
+            const query = search.value.trim().toLowerCase();
+            return rows.filter(row =>
+                row.dataset.search.toLowerCase().includes(query) &&
+                exactFilters.every(([control, key]) => !control.value || row.dataset[key] === control.value));
+        }
+
+        function rememberFilters() {
+            appliedFilterValues = filterControls.map(control => control.value);
+        }
+
+        function restoreFilters() {
+            filterControls.forEach((control, index) => { control.value = appliedFilterValues[index]; });
+        }
+
+        function applyFilter(updateHash = true) {
+            filtered = matchingRows();
+            rememberFilters();
+            const retained = filtered.some(row => row.dataset.service === selected);
+            select(retained ? selected : filtered[0]?.dataset.service, updateHash, true);
+        }
+
+        function clearFilters() {
+            search.value = scheme.value = robots.value = reachability.value = '';
+            for (const [control] of discoveryFilters) control.value = '';
+            filtered = rows;
+        }
+
+        function sortRows() {
+            const column = { origin: 0, title: 1, status: 3 }[sortKey];
+            rows.sort((a, b) => {
+                const compared = sortKey === 'scheme'
+                    ? collator.compare(a.dataset.scheme, b.dataset.scheme) || Number(a.dataset.port) - Number(b.dataset.port)
+                    : collator.compare(a.cells[column].querySelector('.cell-value').textContent.trim(),
+                        b.cells[column].querySelector('.cell-value').textContent.trim());
+                return (compared || collator.compare(a.dataset.service, b.dataset.service)) * sortDirection;
+            });
+            const body = document.getElementById('services');
+            for (const row of rows) body.appendChild(row);
+            for (const header of sortHeaders) {
+                const active = header.dataset.sort === sortKey;
+                if (active) header.setAttribute('aria-sort', sortDirection === 1 ? 'ascending' : 'descending');
+                else header.removeAttribute('aria-sort');
+                header.querySelector('.sort-indicator').textContent = active ? (sortDirection === 1 ? '↑' : '↓') : '↕';
+                const button = header.querySelector('button');
+                const label = button.textContent.replace(/[↑↓↕]/g, '').trim();
+                button.setAttribute('aria-label', `${label}: sort ${active && sortDirection === 1 ? 'descending' : 'ascending'}`);
+            }
+        }
+
+        function revealService(id, updateHash = false) {
+            const row = byId.get(id);
+            if (!row) return false;
+            // Relax only predicates that exclude this explicit target; retain matching filters and sort.
+            if (!row.dataset.search.toLowerCase().includes(search.value.trim().toLowerCase())) search.value = '';
+            for (const [control, key] of exactFilters)
+                if (control.value && control.value !== row.dataset[key]) control.value = '';
+            filtered = matchingRows();
+            rememberFilters();
+            select(id, updateHash);
+            return true;
+        }
+
+        function fromHash(hash = location.hash) {
+            let id;
+            try { id = decodeURIComponent(hash.slice(1)); }
+            catch { return false; }
+            return revealService(id);
+        }
+
+        function historyNavigation() {
+            // Same-document history keeps the current applied filters, rather than restoring old form values.
+            restoreFilters();
+            fromHash();
+            // History traversal can restore form values without input/change events after popstate.
+            // Reconcile controls before the next paint, without a delayed initialization or scroll action.
+            requestAnimationFrame(restoreFilters);
+        }
+
+        function move(offset) {
+            if (!filtered.length) return;
+            const index = filtered.findIndex(row => row.dataset.service === selected);
+            select(filtered[(index + offset + filtered.length) % filtered.length].dataset.service);
+        }
+
+        previous.addEventListener('click', () => move(-1));
+        next.addEventListener('click', () => move(1));
+        random.addEventListener('click', () => {
+            if (filtered.length) select(filtered[Math.floor(Math.random() * filtered.length)].dataset.service);
+        });
+        copyLink.addEventListener('click', async () => {
+            if (!selected) return;
+            const request = ++copyRequest;
+            const url = new URL(location.href);
+            url.hash = selected;
+            clearTimeout(copyFeedbackTimer);
+            copyStatus.textContent = '';
+            copyFallback.hidden = true;
+            try {
+                await navigator.clipboard.writeText(url.href);
+                if (request !== copyRequest) return;
+                copyStatus.textContent = 'Copied';
+                copyFeedbackTimer = setTimeout(() => { copyStatus.textContent = ''; }, 2500);
+            } catch {
+                if (request !== copyRequest) return;
+                // HTTP, offline files and denied clipboard access still offer a shareable URL.
+                copyUrl.value = url.href;
+                copyFallback.hidden = false;
+                copyStatus.textContent = 'Select and copy the link below.';
+                copyUrl.focus();
+                copyUrl.select();
+            }
+        });
+        search.addEventListener('input', () => applyFilter());
+        for (const filter of [scheme, robots, reachability, ...discoveryFilters.map(([control]) => control)])
+            filter.addEventListener('change', () => applyFilter());
+        for (const header of sortHeaders) {
+            const button = header.querySelector('button');
+            button.disabled = false;
+            button.addEventListener('click', () => {
+                sortDirection = sortKey === header.dataset.sort ? -sortDirection : 1;
+                sortKey = header.dataset.sort;
+                sortRows();
+                applyFilter(false);
+            });
+        }
+        document.getElementById('reset').addEventListener('click', () => { clearFilters(); applyFilter(); });
+        const discovery = document.getElementById('discovery-filters');
+        discovery.addEventListener('toggle', () => {
+            updateStickyControls();
+            // Expanding may make the toolbar too tall to pin; keep the opened filters in view.
+            if (discovery.open) discovery.scrollIntoView({ block: 'nearest' });
+        });
+        document.addEventListener('click', event => {
+            const link = event.target.closest('a[href^="#service-"]');
+            if (!link || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+            const id = link.getAttribute('href').slice(1);
+            if (!byId.has(id)) return;
+            event.preventDefault();
+            revealService(id, true);
+            document.getElementById(id).focus({ preventScroll: true });
+            document.getElementById(id).scrollIntoView({ block: 'nearest' });
+        });
+        window.addEventListener('hashchange', historyNavigation);
+        window.addEventListener('popstate', historyNavigation);
+        window.addEventListener('pageshow', () => {
+            // This also preserves applied filters on BFCache reactivation; fresh documents get defaults below.
+            restoreFilters();
+            requestAnimationFrame(restoreFilters);
+        });
+        document.addEventListener('keydown', event => {
+            if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.target.isContentEditable ||
+                event.target.closest('input, select, textarea, button, a, summary')) return;
+            if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+                event.preventDefault();
+                move(event.key === 'ArrowLeft' ? -1 : 1);
+            }
+            if (event.key === 'r') random.click();
+        });
+
+        // Filters are intentionally not persisted across fresh document loads/reloads.
+        // Ignore browser-restored values; Reset filters remains a separate action that selects All results.
+        clearFilters();
+        reachability.value = 'true';
+        sortRows();
+        applyFilter(false);
+        if (!fromHash(initialHash)) select(filtered[0]?.dataset.service, false);
+        if (!initialHash) window.addEventListener('load', () => {
+            // Even replaceState during parsing can become the browser's initial fragment target.
+            // Add the default service URL after initial navigation has finished; the DOM is already final.
+            requestAnimationFrame(() => {
+                if (selected && !location.hash) history.replaceState(null, '', '#' + selected);
+            });
+        }, { once: true });
+        controls.hidden = false;
+        updateStickyControls();
+        window.addEventListener('resize', updateStickyControls);
+        if (typeof ResizeObserver !== 'undefined') new ResizeObserver(updateStickyControls).observe(controls);
+    }
+})();
+</script>
 </head>
 <body>
 <header>
@@ -170,219 +464,6 @@
         Affiliate link — I may earn a commission if you sign up.</p>
     </footer>
 </main>
-<script>
-const scan = {{scanJson}};
 
-(() => {
-    const rows = Array.from(document.querySelectorAll('#services tr'));
-    const panels = Array.from(document.querySelectorAll('.service-detail'));
-    const byId = new Map(rows.map(row => [row.dataset.service, row]));
-    const search = document.getElementById('search');
-    const scheme = document.getElementById('scheme');
-    const robots = document.getElementById('robots');
-    const reachability = document.getElementById('reachability');
-    const discoveryFilters = [
-        [document.getElementById('homepage-response'), 'response'],
-        [document.getElementById('has-title'), 'title'],
-        [document.getElementById('has-links'), 'links'],
-        [document.getElementById('port-kind'), 'portKind']
-    ];
-    const sortHeaders = Array.from(document.querySelectorAll('th[data-sort]'));
-    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
-    let sortKey = 'origin';
-    let sortDirection = 1;
-    const previous = document.getElementById('previous');
-    const next = document.getElementById('next');
-    const random = document.getElementById('random');
-    const controls = document.getElementById('controls');
-    const copyLink = document.getElementById('copy-link');
-    const copyStatus = document.getElementById('copy-status');
-    const copyFallback = document.getElementById('copy-fallback');
-    const copyUrl = document.getElementById('copy-url');
-    let filtered = rows;
-    let selected = null;
-    let copyRequest = 0;
-    let copyFeedbackTimer;
-
-    function updateStickyControls() {
-        const height = controls.getBoundingClientRect().height;
-        // Keep narrow, short or zoomed viewports free of a large pinned toolbar.
-        const sticky = window.innerWidth > 900 && height <= window.innerHeight / 3;
-        controls.classList.toggle('is-sticky', sticky);
-        document.documentElement.style.setProperty('--controls-offset', sticky ? `${height + 16}px` : '0px');
-    }
-
-    function render() {
-        const visible = new Set(filtered);
-        for (const row of rows) {
-            row.hidden = !visible.has(row);
-            const active = row.dataset.service === selected;
-            row.classList.toggle('selected', active);
-            const link = row.querySelector('a');
-            if (active) link.setAttribute('aria-current', 'true');
-            else link.removeAttribute('aria-current');
-        }
-        for (const panel of panels) panel.hidden = panel.id !== selected;
-        const index = filtered.findIndex(row => row.dataset.service === selected);
-        document.getElementById('counter').textContent = `${index + 1} / ${filtered.length} matching · ${rows.length} total`;
-        document.getElementById('directory-count').textContent = `${filtered.length} of ${rows.length} public service results`;
-        document.getElementById('no-matches').hidden = filtered.length !== 0;
-        document.getElementById('no-selection').hidden = selected !== null;
-        for (const button of [previous, next, random]) button.disabled = filtered.length === 0;
-        copyLink.disabled = selected === null;
-        const activeDiscovery = discoveryFilters.filter(([control]) => control.value).length;
-        document.getElementById('discovery-count').textContent = activeDiscovery ? `(${activeDiscovery} active)` : '';
-    }
-
-    function select(id, updateHash = true, replace = false) {
-        ++copyRequest;
-        clearTimeout(copyFeedbackTimer);
-        copyStatus.textContent = '';
-        copyFallback.hidden = true;
-        selected = byId.has(id) ? id : null;
-        render();
-        if (updateHash && selected && location.hash !== '#' + selected) {
-            if (replace) history.replaceState(null, '', '#' + selected);
-            else history.pushState(null, '', '#' + selected);
-        }
-    }
-
-    function applyFilter(updateHash = true) {
-        const query = search.value.trim().toLowerCase();
-        filtered = rows.filter(row =>
-            row.dataset.search.toLowerCase().includes(query) &&
-            (!scheme.value || row.dataset.scheme === scheme.value) &&
-            (!robots.value || row.dataset.robots === robots.value) &&
-            (!reachability.value || row.dataset.reachable === reachability.value) &&
-            discoveryFilters.every(([control, key]) => !control.value || row.dataset[key] === control.value));
-        const retained = filtered.some(row => row.dataset.service === selected);
-        select(retained ? selected : filtered[0]?.dataset.service, updateHash, true);
-    }
-
-    function clearFilters() {
-        search.value = scheme.value = robots.value = reachability.value = '';
-        for (const [control] of discoveryFilters) control.value = '';
-        filtered = rows;
-    }
-
-    function sortRows() {
-        const column = { origin: 0, title: 1, status: 3 }[sortKey];
-        rows.sort((a, b) => {
-            const compared = sortKey === 'scheme'
-                ? collator.compare(a.dataset.scheme, b.dataset.scheme) || Number(a.dataset.port) - Number(b.dataset.port)
-                : collator.compare(a.cells[column].querySelector('.cell-value').textContent.trim(),
-                    b.cells[column].querySelector('.cell-value').textContent.trim());
-            return (compared || collator.compare(a.dataset.service, b.dataset.service)) * sortDirection;
-        });
-        const body = document.getElementById('services');
-        for (const row of rows) body.appendChild(row);
-        for (const header of sortHeaders) {
-            const active = header.dataset.sort === sortKey;
-            if (active) header.setAttribute('aria-sort', sortDirection === 1 ? 'ascending' : 'descending');
-            else header.removeAttribute('aria-sort');
-            header.querySelector('.sort-indicator').textContent = active ? (sortDirection === 1 ? '↑' : '↓') : '↕';
-            const button = header.querySelector('button');
-            const label = button.textContent.replace(/[↑↓↕]/g, '').trim();
-            button.setAttribute('aria-label', `${label}: sort ${active && sortDirection === 1 ? 'descending' : 'ascending'}`);
-        }
-    }
-
-    function fromHash() {
-        let id;
-        try { id = decodeURIComponent(location.hash.slice(1)); }
-        catch { return false; }
-        if (!byId.has(id)) return false;
-        // Shared links and discovered-host links must remain usable when filters hide their target.
-        if (!filtered.some(row => row.dataset.service === id)) clearFilters();
-        select(id, false);
-        return true;
-    }
-
-    function move(offset) {
-        if (!filtered.length) return;
-        const index = filtered.findIndex(row => row.dataset.service === selected);
-        select(filtered[(index + offset + filtered.length) % filtered.length].dataset.service);
-    }
-
-    previous.addEventListener('click', () => move(-1));
-    next.addEventListener('click', () => move(1));
-    random.addEventListener('click', () => {
-        if (filtered.length) select(filtered[Math.floor(Math.random() * filtered.length)].dataset.service);
-    });
-    copyLink.addEventListener('click', async () => {
-        if (!selected) return;
-        const request = ++copyRequest;
-        const url = new URL(location.href);
-        url.hash = selected;
-        clearTimeout(copyFeedbackTimer);
-        copyStatus.textContent = '';
-        copyFallback.hidden = true;
-        try {
-            await navigator.clipboard.writeText(url.href);
-            if (request !== copyRequest) return;
-            copyStatus.textContent = 'Copied';
-            copyFeedbackTimer = setTimeout(() => { copyStatus.textContent = ''; }, 2500);
-        } catch {
-            if (request !== copyRequest) return;
-            // HTTP, offline files and denied clipboard access still offer a shareable URL.
-            copyUrl.value = url.href;
-            copyFallback.hidden = false;
-            copyStatus.textContent = 'Select and copy the link below.';
-            copyUrl.focus();
-            copyUrl.select();
-        }
-    });
-    search.addEventListener('input', () => applyFilter());
-    for (const filter of [scheme, robots, reachability, ...discoveryFilters.map(([control]) => control)])
-        filter.addEventListener('change', () => applyFilter());
-    for (const header of sortHeaders) {
-        const button = header.querySelector('button');
-        button.disabled = false;
-        button.addEventListener('click', () => {
-            sortDirection = sortKey === header.dataset.sort ? -sortDirection : 1;
-            sortKey = header.dataset.sort;
-            sortRows();
-            applyFilter(false);
-        });
-    }
-    document.getElementById('reset').addEventListener('click', () => { clearFilters(); applyFilter(); });
-    const discovery = document.getElementById('discovery-filters');
-    discovery.addEventListener('toggle', () => {
-        updateStickyControls();
-        // Expanding may make the toolbar too tall to pin; keep the opened filters in view.
-        if (discovery.open) discovery.scrollIntoView({ block: 'nearest' });
-    });
-    document.addEventListener('click', event => {
-        const link = event.target.closest('a[href^="#service-"]');
-        if (!link || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-        const id = link.getAttribute('href').slice(1);
-        if (!byId.has(id)) return;
-        event.preventDefault();
-        if (!filtered.some(row => row.dataset.service === id)) clearFilters();
-        select(id);
-        document.getElementById(id).focus({ preventScroll: true });
-        document.getElementById(id).scrollIntoView({ block: 'nearest' });
-    });
-    window.addEventListener('hashchange', fromHash);
-    window.addEventListener('popstate', fromHash);
-    document.addEventListener('keydown', event => {
-        if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.target.isContentEditable ||
-            event.target.closest('input, select, textarea, button, a, summary')) return;
-        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-            event.preventDefault();
-            move(event.key === 'ArrowLeft' ? -1 : 1);
-        }
-        if (event.key === 'r') random.click();
-    });
-
-    sortRows();
-    applyFilter(false);
-    if (!fromHash()) select(filtered[0]?.dataset.service, !location.hash, true);
-    controls.hidden = false;
-    updateStickyControls();
-    window.addEventListener('resize', updateStickyControls);
-    if (typeof ResizeObserver !== 'undefined') new ResizeObserver(updateStickyControls).observe(controls);
-})();
-</script>
 </body>
 </html>

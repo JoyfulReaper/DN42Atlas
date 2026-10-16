@@ -194,21 +194,50 @@ public sealed class AtlasReportGeneratorTests
     }
 
     [TestMethod]
+    public void HeadBootstrapPreparesEnhancementWithoutBreakingTheStaticFallback()
+    {
+        var html = Generate("""
+            {"Results":[
+              {"Domain":"online.dn42","Scheme":"http","Port":80,"Reachable":true},
+              {"Domain":"offline.dn42","Scheme":"https","Port":443,"Reachable":false}
+            ]}
+            """);
+        Assert.IsLessThan(html.IndexOf("</head>", StringComparison.Ordinal), html.IndexOf("<script>", StringComparison.Ordinal));
+        Assert.Contains(".js-pending body { visibility: hidden; }", html);
+        Assert.Contains(".js-pending .service-detail { display: none; }", html,
+            "JS-enabled parsing must not lay out every service panel before initialization.");
+        Assert.Contains("document.addEventListener('DOMContentLoaded'", html);
+        Assert.Contains("root.classList.remove('js-pending')", html);
+        Assert.DoesNotContain("<html lang=\"en\" class=\"js-pending\"", html,
+            "Only executing JavaScript may enable the pending presentation.");
+        var basic = WithoutScript(html);
+        Assert.HasCount(2, Regex.Matches(basic, "<tr data-service="));
+        Assert.HasCount(2, Regex.Matches(basic, "<article class=\"card service-detail\""));
+        foreach (Match article in Regex.Matches(basic, "<article class=\"card service-detail\"[^>]*>"))
+            Assert.DoesNotContain(" hidden", article.Value);
+        Assert.Contains("<noscript>", basic);
+        Assert.Contains("id=\"controls\" hidden", basic);
+    }
+
+    [TestMethod]
     public void ClientNavigationUpdatesHistoryWithoutNativeAnchorScrolling()
     {
         var html = Generate("""{"Results":[]}""");
-        var script = html[html.IndexOf("<script>", StringComparison.Ordinal)..];
+        var script = Regex.Match(html, "<script>(.*?)</script>", RegexOptions.Singleline).Groups[1].Value;
         Assert.IsFalse(Regex.IsMatch(script, @"location\.hash\s*=(?!=)"),
             "Hash assignment performs native anchor navigation and scrolls the viewport.");
         Assert.Contains("history.pushState(null, '', '#' + selected)", script);
         Assert.Contains("history.replaceState(null, '', '#' + selected)", script);
-        Assert.Contains("window.addEventListener('popstate', fromHash)", script);
-        Assert.Contains("window.addEventListener('hashchange', fromHash)", script);
-        Assert.Contains("if (!fromHash())", script);
+        Assert.Contains("window.addEventListener('popstate', historyNavigation)", script);
+        Assert.Contains("window.addEventListener('hashchange', historyNavigation)", script);
         var selection = script[script.IndexOf("function select(", StringComparison.Ordinal)..
             script.IndexOf("function applyFilter(", StringComparison.Ordinal)];
         Assert.DoesNotContain("scrollIntoView", selection);
         Assert.DoesNotContain(".focus(", selection);
+        var navigation = script[script.IndexOf("function move(", StringComparison.Ordinal)..
+            script.IndexOf("copyLink.addEventListener(", StringComparison.Ordinal)];
+        Assert.DoesNotContain("scrollIntoView", navigation);
+        Assert.DoesNotContain(".focus(", navigation);
     }
 
     [TestMethod]
@@ -284,7 +313,7 @@ public sealed class AtlasReportGeneratorTests
     }
 
     private static string Generate(string json) => AtlasReportGenerator.GenerateHtml(JsonNode.Parse(json)!);
-    private static string WithoutScript(string html) => html[..html.IndexOf("<script>", StringComparison.Ordinal)];
+    private static string WithoutScript(string html) => Regex.Replace(html, "<script>.*?</script>", "", RegexOptions.Singleline);
     private static string[] Ids(string html) => Regex.Matches(html, "<tr data-service=\"(service-[a-f0-9]+)\"")
         .Select(match => match.Groups[1].Value).ToArray();
 }
