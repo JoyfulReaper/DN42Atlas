@@ -388,7 +388,10 @@ const scan = {{scanJson}};
                 event.preventDefault();
                 move(event.key === 'ArrowLeft' ? -1 : 1);
             }
-            if (event.key === 'r') random.click();
+            if (event.key === 'r') {
+                event.preventDefault();
+                random.click();
+            }
         });
 
         // Filters are intentionally not persisted across fresh document loads/reloads.

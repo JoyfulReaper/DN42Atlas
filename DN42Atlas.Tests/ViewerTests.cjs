@@ -116,6 +116,13 @@ function viewer({ hash = '', empty = false, restored = {}, initialize = true, co
         visible() { return ui.services.children.filter(row => !row.hidden).map(row => row.dataset.service.slice(8)); },
         selected() { return panels.find(panel => !panel.hidden)?.id.slice(8); },
         random(value) { randomValue = value; ui.random.click(); },
+        key(key, { random = 0, target = { closest() { return null; } }, ...options } = {}) {
+            randomValue = random;
+            const event = { key, target, defaultPrevented: false,
+                preventDefault() { this.defaultPrevented = true; }, ...options };
+            document.events.keydown(event);
+            return event;
+        },
         clickRow(id, part, options = {}) {
             const row = rows.find(row => row.dataset.service === 'service-' + id);
             const interactive = ['origin', 'view-details', 'button', 'select', 'input', 'textarea', 'summary', 'details', 'label', 'editable', 'role-button', 'role-link'].includes(part);
@@ -381,6 +388,38 @@ test('Previous/Next/Random update history without scrolling or moving focus', ()
     v.random(0.999);
     assert.equal(v.history.calls.filter(call => call === 'push').length, 3);
     assert.equal(v.panels.some(panel => panel.scrolledIntoView || panel.focused), false);
+});
+
+test('repeated r presses draw from the filtered set and cancel browser type-ahead without moving focus', () => {
+    const v = viewer();
+    v.sort('scheme');
+    v.filter('port-kind', 'other');
+    assert.deepEqual(v.visible(), ['d', 'b']);
+    for (const [random, selected] of [[0.999, 'b'], [0, 'd'], [0.999, 'b']]) {
+        const event = v.key('r', { random });
+        assert.equal(v.selected(), selected);
+        assert.equal(v.location.hash, '#service-' + selected);
+        assert.equal(event.defaultPrevented, true, 'Browser type-ahead must not focus a link and block subsequent shortcuts.');
+    }
+    assert.equal(v.history.calls.filter(call => call === 'push').length, 3);
+    assert.equal([...Object.values(v.ui), ...v.rows.map(row => row.originLink)]
+        .some(item => item.scrolledIntoView || item.focused), false);
+});
+
+test('r leaves typing, focused controls, modified keys and unrelated keys alone', () => {
+    const v = viewer();
+    const before = [...v.history.calls];
+    const targets = ['input', 'textarea', 'select', 'button', 'a', 'summary']
+        .map(tag => ({ closest(selector) { return selector.split(', ').includes(tag) ? this : null; } }));
+    // isContentEditable also covers descendants inheriting an editable ancestor and plaintext-only editors.
+    targets.push({ isContentEditable: true, closest() { return null; } });
+    for (const target of targets)
+        assert.equal(v.key('r', { target, random: 0.999 }).defaultPrevented, false);
+    for (const modifier of ['ctrlKey', 'metaKey', 'altKey', 'shiftKey'])
+        assert.equal(v.key('r', { [modifier]: true, random: 0.999 }).defaultPrevented, false);
+    assert.equal(v.key('x', { random: 0.999 }).defaultPrevented, false);
+    assert.equal(v.selected(), 'a');
+    assert.deepEqual(v.history.calls, before);
 });
 
 test('fresh-load selection is final before paint without supplying a fragment to the browser during parsing', () => {
