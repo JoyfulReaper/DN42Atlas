@@ -84,7 +84,7 @@ For interactive review on a Bash deployment, use the executable helper at the re
 
 It loads `~/.config/dn42atlas/oidc.env` when present. Override that path with its optional argument or `DN42ATLAS_ADMIN_ENV_FILE`; an explicitly selected missing file is an error. Without a default file it uses the existing environment. The file is trusted shell configuration and is sourced with automatic export; keep it private and do not source untrusted files. Environment contents are not printed. The helper locates its repository directory, runs the OptOut CLI with `--no-launch-profile`, and requires Bash and the .NET SDK, not sqlite3. It offers pending list, detail, status selection, and deletion. Deletion shows the full request first and requires typing `DELETE` exactly. CLI failures are reported and return to the menu.
 
-The current preview source pages already link to `/operator` and `/contact`. Deployment routes `/contact` to this application over HTTPS; Atlas does not install proxy configuration. Separately, generated `published/` support pages are intentionally preserved on republish; older installed copies may need updating. The preview site remains separate from generated listings until no earlier than October 16, 2026.
+The public Atlas directory is served from `published/`. The support page templates in `DN42Atlas/site/` link to `/operator` and `/contact`. Deployment routes `/contact` to this application over HTTPS; Atlas does not install proxy configuration. Existing `published/` support pages are intentionally preserved on republish, so older installed copies need an explicit operator update when templates change.
 
 ## Persistent deployment
 
@@ -94,7 +94,7 @@ From a clean non-root deployment checkout, run `./deploy-optout.sh`. It pulls `-
 
 After successful activation and the service check, retention keeps current plus the three newest other completed releases. `DN42ATLAS_OPTOUT_RETAIN_PREVIOUS=0` keeps current only; the default is `3`. Values must be non-negative integers. Current is explicitly preserved even when it is older than other releases. Only direct real directories matching the script's release naming convention are eligible; hidden temps, symlinks and unrelated files/directories are ignored. Pruning failure returns nonzero with a clear error, while leaving the newly active deployment in place. Failed publish/activation cleans only this deployment's temporary directory/link; failed restart does not prune and does not automatically restore the old current symlink.
 
-See [the architecture guide](../docs/ARCHITECTURE.md) for deployment boundaries, layout and recovery. Source edits affect the served source preview when those pages are the web root, but OptOut binary changes require deployment. No public listing launch is performed by this script.
+See [the architecture guide](../docs/ARCHITECTURE.md) for deployment boundaries, layout and recovery. Changes to source support pages must be propagated explicitly to the installed `published/` copies; OptOut binary changes require deployment. This script does not configure nginx or deploy the static directory.
 
 ## Registry freshness
 
