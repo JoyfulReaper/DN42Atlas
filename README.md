@@ -8,7 +8,7 @@ It can also turn a scan result into a self-contained HTML viewer for casually fl
 
 This is primarily a hobby project for exploring DN42 and learning more about routing, service discovery, and the weird little corners of private networks.
 
-The site remains in private preview. Public service listings will not launch before **October 16, 2026**. Authenticated self-service at `/operator` and manual requests at `/contact` are live; the OptOut application runs persistently under systemd. The crawler can generate artifacts independently of this launch gate, so keep generated listings separate from the served preview site until an explicit launch decision.
+DN42Atlas's filtered service directory is public. nginx serves the generated `published/` site, including `index.html` and `latest.json`. Authenticated self-service at `/operator` and manual requests at `/contact` are live; the OptOut application runs persistently under systemd. The crawler updates the directory, while installed support pages such as `about.html` are deliberately preserved and require separate updates when their wording changes.
 
 ## What It Does
 
@@ -200,7 +200,7 @@ The list omits Message; detail includes it. Leaving Pending sets ReviewedUtc, ch
 
 `./dn42atlas-request-admin [env-file]` offers the same operations interactively and requires exact `DELETE` confirmation after showing a request. It sources trusted deployment configuration from `~/.config/dn42atlas/oidc.env` when present; its argument or `DN42ATLAS_ADMIN_ENV_FILE` overrides that path. See [OptOut configuration](DN42Atlas.OptOut/README.md#manual-requests-and-notifications) for database initialization and the standard `Ntfy__ServerUrl`, `Ntfy__Topic`, `Ntfy__AccessToken`, and `Ntfy__Timeout` settings. Keep secrets out of source control.
 
-## Deployment and Private Preview
+## Deployment and Public Site
 
 The deployed OptOut service uses systemd to run:
 
@@ -215,9 +215,9 @@ The existing deployment binds OptOut to `127.0.0.1:5078`. nginx serves static co
 | Location | Purpose |
 | --- | --- |
 | `/opt/DN42Atlas` | Source checkout, config, CLI and deployment helpers |
-| `DN42Atlas/site/` | Source preview pages served during the launch gate; already linked to live support routes |
+| `DN42Atlas/site/` | Source templates for public support pages, plus the former preview landing page; not the deployed web root |
 | `results/` | Private historical raw scans and adjacent reports; never serve this directory |
-| `published/` | Generated/derived listing and support artifacts, separate from the current preview root |
+| `published/` | nginx-served public directory (`index.html`, `latest.json`) and operator-maintained support pages |
 | `/var/lib/dn42atlas/registry` | Private dedicated registry authorization checkout |
 | `/var/lib/dn42atlas/exclusions.db` | Private exclusion audit records |
 | `/var/lib/dn42atlas/manual-requests.db` | Private manual request records |
@@ -227,7 +227,7 @@ The existing deployment binds OptOut to `127.0.0.1:5078`. nginx serves static co
 
 Paths above describe the production layout conceptually; use the configured absolute paths for your deployment. Crawler commands use working-directory defaults for `results/`, `published/`, and manual policy files. Resolution reads `<DN42ATLAS_REGISTRY_PATH>/data/dns` when configured; the setting is the checkout root shared with OptOut authorization and `registry-update`. Explicit constructor overrides take priority in tests; without configuration the developer fallback remains `~/dn42-registry/data/dns`. Configured roots must be nonempty absolute paths.
 
-The preview source pages link to `/operator` as the primary Auth42 self-service opt-out, `/contact` for manually reviewed exceptions, and GitHub issues only as a public backup when those routes are unavailable. The publisher preserves already-installed support pages; updating those derived copies is an operator decision. After merging opt-out wording changes, update the deployed checkout used by the preview site. If nginx serves the generated `published/` site, compare and explicitly refresh the existing `published/about.html` and `published/opt-out.html` from `DN42Atlas/site/`; preserve any operator customizations and keep backups **outside** the public web root. Regenerating listings alone will not refresh those files. Verify the *served* `/about.html` and `/opt-out.html` links to `/operator`, `/contact`, and the GitHub backup after deployment. Do not switch nginx to generated listings before the no-earlier-than **October 16, 2026** launch gate. Deployment does not make that switch or schedule crawls.
+The live site serves `published/` via nginx. The support page templates in `DN42Atlas/site/` link to `/operator` for Auth42 self-service, `/contact` for manual requests, and GitHub issues as a public backup. The publisher preserves existing `published/about.html`, `published/opt-out.html`, and `published/robots.txt` instead of replacing them during a crawl or republish. **After merging changes to the source support pages, compare them to the deployed copies and explicitly refresh any outdated pages** (especially `published/about.html`). Preserve operator customizations and put backups **outside** the public web root. Another crawl alone will not refresh an existing support page. Verify the *served* `/about.html` and `/opt-out.html` text and links to `/operator`, `/contact`, and the GitHub backup after deployment. Neither the crawler nor OptOut deployment modifies nginx.
 
 ## Commands
 
@@ -267,7 +267,7 @@ published/
   robots.txt
 ```
 
-`published/` is the derived static output root intended for the public Atlas. Its `index.html` and `latest.json` contain the current filtered artifact; `results/` holds private timestamped historical data. The current served preview uses source pages instead; generating output is not authorization to launch it.
+`published/` is the nginx-served public Atlas root. Its `index.html` and `latest.json` contain the current filtered artifacts; `results/` holds private timestamped historical data and must never be served. Source support templates under `DN42Atlas/site/` are not served directly.
 
 Public generation reads the raw scan into a fresh in-memory JSON model and applies the current `PublicScanPolicy` exactly once. Both `latest.json` and the HTML's embedded scan are serialized from that same filtered/redacted model. The original raw JSON remains unchanged. HTML serialization retains its safe default encoder so scan content cannot close the embedded script.
 
@@ -316,7 +316,7 @@ The permanent private lock file is `<publication-state-path>.operation-lock`: pr
 
 Publishing CLI, maintenance and startup recovery wait for ownership (lock acquisition is cancellable internally). Web final mutations wait at most one second for each local/OS gate, returning HTTP 503 with `Retry-After: 30` and retry guidance if busy, with no DB/runtime/public changes. A 10–15 minute crawl therefore temporarily defers self-service mutations instead of holding their HTTP requests. Existing served listing remains as it was until a mutation actually obtains ownership.
 
-The [crawler deployment guide](deployment/systemd/README.md) includes opt-in systemd templates for a daily 01:30 local-time run with up to 15 minutes randomized delay and persistent missed-run handling. They use the source checkout, a separate minimal `crawler.env`, and a 45-minute service limit including build/lock waiting. Templates are not installed automatically. They refresh hidden `/opt/DN42Atlas/published` artifacts while nginx continues serving `/opt/DN42Atlas/DN42Atlas/site`; the no-earlier-than **October 16, 2026** launch gate is unchanged. No unit modifies nginx or switches the preview root.
+The [crawler deployment guide](deployment/systemd/README.md) includes opt-in systemd templates for a daily 01:30 local-time run with up to 15 minutes randomized delay and persistent missed-run handling. They use the source checkout, a separate minimal `crawler.env`, and a 45-minute service limit including build/lock waiting. Templates are not installed automatically. They refresh `index.html` and `latest.json` under the nginx-served `/opt/DN42Atlas/published` directory. No unit modifies nginx or replaces installed support pages.
 
 ### Registry / DNS Scan
 
@@ -581,7 +581,7 @@ than:
 
 Very experimental.
 
-The crawler, authenticated self-service, reversible exclusions, manual request management, and persistent OptOut deployment are implemented. Public service listings remain gated until no earlier than October 16, 2026. See the [architecture guide](docs/ARCHITECTURE.md#known-limitations--future-work) for operational limitations.
+The crawler, public service directory, authenticated self-service, reversible exclusions, manual request management, and persistent OptOut deployment are implemented. The directory is served from `published/`; individual services and scan results may still be incomplete or unavailable. See the [architecture guide](docs/ARCHITECTURE.md#known-limitations--future-work) for operational limitations.
 
 Expect:
 

@@ -18,9 +18,10 @@ policy. Historical raw scans are immutable evidence; public JSON and HTML are
 derived views that can be rebuilt under current exclusions. Publishing never
 consults current DNS to invent historical destinations.
 
-The live site is still a private preview. Public listings will not launch before
-October 16, 2026. Artifact generation does not enforce a calendar gate: deployment
-must keep the source preview root separate from generated listings until launch.
+The public site serves filtered Atlas listings from `published/` via nginx.
+The crawler publishes the generated directory and JSON there; source support
+page templates remain in `DN42Atlas/site/`. Existing installed support pages
+are preserved on republish and need explicit operator updates.
 
 ## Major components
 
@@ -131,7 +132,8 @@ withdraw listings. Replacing JSON, HTML and then private state is **not one tran
 a crash between replacements can leave a mismatched pair or old state. Investigate
 failures before retrying and coordinate all publishers. Installed support files
 (`about.html`, `opt-out.html`, `robots.txt`) are created only when absent; other
-operator pages/assets are preserved. Source preview pages are a separate web root.
+operator pages/assets are preserved. Source support templates are not the
+nginx-served production web root.
 
 ## Exclusion architecture
 
@@ -235,7 +237,7 @@ home-directory fallback. `deployment/systemd/` supplies a oneshot source-checkou
 run at 01:30 local time daily, persistent with up to 15 minutes random delay, and
 a 45-minute maximum runtime. Its separate `crawler.env` contains only registry,
 runtime and publication-state paths. Templates are opt-in, not installed by code;
-nginx continues serving the preview root until the October 16 launch gate.
+nginx serves `published/` and is not reconfigured by the crawler or these units.
 
 ## Manual request architecture
 
@@ -302,10 +304,10 @@ These are conceptual deployment paths, not universal CLI defaults:
 | Path | Classification and lifetime |
 | --- | --- |
 | `/opt/DN42Atlas` | Source/config checkout, scripts and submodule |
-| `/opt/DN42Atlas/DN42Atlas/site` | Public source preview pages; launch gate stays in place |
+| `/opt/DN42Atlas/DN42Atlas/site` | Source templates for support pages and legacy preview; not served directly |
 | `/opt/DN42Atlas/config` | Source/operator configuration; manual host/prefix rules, not served |
 | `/opt/DN42Atlas/results` | Private raw data and historical HTML; retained independently of releases |
-| `/opt/DN42Atlas/published` | Public/derived artifacts; not the current preview root |
+| `/opt/DN42Atlas/published` | nginx-served directory and installed support pages |
 | `/opt/dn42atlas-optout/releases` | Replaceable published application binaries, not crawler artifacts/state |
 | `/opt/dn42atlas-optout/current` | Active release symlink used by systemd |
 | `/var/lib/dn42atlas/registry` | Private persistent dedicated authorization snapshot |
@@ -335,7 +337,7 @@ does not change the crawler's working-directory published root.
 ```mermaid
 flowchart TD
   Browser --> Nginx[nginx HTTPS]
-  Nginx --> Static[Source preview now; derived public artifacts only after launch]
+  Nginx --> Static[Filtered public directory and support pages in published/]
   Nginx --> Dynamic[Selected routes to 127.0.0.1:5078]
   Dynamic --> Service[systemd dn42atlas-optout.service]
   Service --> Current[/opt/dn42atlas-optout/current]
@@ -365,8 +367,9 @@ owned temp directory/link; restart failure leaves old releases untouched and doe
 not automatically roll back the newly activated current.
 
 Source code changes alone do not update the running OptOut binary. Deploy them.
-Source preview edits can change served static pages when that directory is the
-configured web root. Generated support copies remain protected from overwrite.
+Source support page edits do not update the live `published/` copies. Compare
+and refresh installed support pages explicitly, retaining local customizations
+and backups outside the public web root. Crawls preserve existing support files.
 
 ## Failure behavior / fail-closed decisions
 
@@ -412,12 +415,12 @@ Use the root README for full crawler syntax and the OptOut README for settings.
 - Self-service supports exact resources only; wildcard/broader cases require manual review.
 - Full `run` defers mutations until completion; standalone scans need separate coordination.
 - Core CLI working-directory defaults differ from web explicit path configuration.
-- There is no pipeline-wide cancellation or automatic public launch gate; scheduling uses opt-in systemd templates.
+- There is no pipeline-wide cancellation; scheduling uses opt-in systemd templates and does not configure nginx.
 - Second-resolution scan filenames can collide under concurrent standalone scans; full `run` serializes.
 - Public artifacts omit provenance and cannot replace immutable raw scans.
 - Release retention has no cross-process deployment lock; deploy one process at a time.
 - Service active-state verification is not an HTTP probe or automatic rollback.
 - Data Protection storage/identity continuity relies on deployment configuration.
-- The preview remains served until an explicit launch no earlier than October 16, 2026.
+- The production web root is `published/`; source support page changes require explicit refresh of installed copies.
 
 Additional protocols are not implemented by this architecture pass.

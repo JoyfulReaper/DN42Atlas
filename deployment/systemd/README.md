@@ -1,9 +1,11 @@
 # Daily crawler templates
 
 These templates run one crawl/publication daily from the existing source checkout.
-They do not install themselves, deploy OptOut, configure nginx, or switch the preview
-root. Keep nginx serving `/opt/DN42Atlas/DN42Atlas/site` until no earlier than
-October 16, 2026. `published/` can be refreshed while hidden; `results/` is private
+They do not install themselves, deploy OptOut, or configure nginx. In the current
+public deployment, nginx serves `/opt/DN42Atlas/published`. The crawler refreshes
+filtered directory artifacts there, but preserves existing `about.html`,
+`opt-out.html`, and `robots.txt`. Update those support pages explicitly when their
+source templates change. `results/` is private
 historical data and must never be served.
 
 The timer runs at 01:30 in the host's local timezone, with up to 15 minutes random
@@ -82,4 +84,4 @@ sudo systemctl start dn42atlas-run.service
 
 The service writes `/opt/DN42Atlas/domain-resolution.json`, timestamped raw JSON/HTML
 under `/opt/DN42Atlas/results`, filtered `published/latest.json`/`index.html`, and
-configured private publication state. It never changes nginx or the launch gate.
+configured private publication state. It does not change nginx or existing support pages.
