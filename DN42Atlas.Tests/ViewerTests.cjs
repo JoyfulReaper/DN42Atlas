@@ -406,10 +406,23 @@ test('repeated r presses draw from the filtered set and cancel browser type-ahea
         .some(item => item.scrolledIntoView || item.focused), false);
 });
 
+test('r keeps selecting new services after a service link receives focus', () => {
+    const v = viewer();
+    const focusedLink = { closest(selector) { return selector.split(', ').includes('a') ? this : null; } };
+
+    for (const [random, selected] of [[0.999, 'd'], [0, 'a'], [0.6, 'b']]) {
+        const event = v.key('r', { target: focusedLink, random });
+        assert.equal(v.selected(), selected);
+        assert.equal(event.defaultPrevented, true);
+    }
+    assert.equal(v.history.calls.filter(call => call === 'push').length, 3);
+    assert.equal(v.key('ArrowRight', { target: focusedLink }).defaultPrevented, false);
+});
+
 test('r leaves typing, focused controls, modified keys and unrelated keys alone', () => {
     const v = viewer();
     const before = [...v.history.calls];
-    const targets = ['input', 'textarea', 'select', 'button', 'a', 'summary']
+    const targets = ['input', 'textarea', 'select', 'button', 'summary']
         .map(tag => ({ closest(selector) { return selector.split(', ').includes(tag) ? this : null; } }));
     // isContentEditable also covers descendants inheriting an editable ancestor and plaintext-only editors.
     targets.push({ isContentEditable: true, closest() { return null; } });
