@@ -383,8 +383,10 @@ const scan = {{scanJson}};
         });
         document.addEventListener('keydown', event => {
             if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey || event.target.isContentEditable ||
-                event.target.closest('input, select, textarea, button, a, summary')) return;
+                event.target.closest('input, select, textarea, button, summary')) return;
             if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+                // Keep native arrow-key behavior when a service link has focus.
+                if (event.target.closest('a')) return;
                 event.preventDefault();
                 move(event.key === 'ArrowLeft' ? -1 : 1);
             }
